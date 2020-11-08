@@ -1,0 +1,271 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<gating:Gating-ML
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:gating="http://www.isac-net.org/std/Gating-ML/v2.0/gating"
+  xmlns:transforms="http://www.isac-net.org/std/Gating-ML/v2.0/transformations"
+  xmlns:data-type="http://www.isac-net.org/std/Gating-ML/v2.0/datatypes"
+  xsi:schemaLocation="
+    http://www.isac-net.org/std/Gating-ML/v2.0/gating
+    http://flowcyt.sourceforge.net/gating/2.0/xsd/Gating-ML.v2.0.xsd
+    http://www.isac-net.org/std/Gating-ML/v2.0/transformations
+    http://flowcyt.sourceforge.net/gating/2.0/xsd/Transformations.v2.0.xsd
+    http://www.isac-net.org/std/Gating-ML/v2.0/datatypes
+    http://flowcyt.sourceforge.net/gating/2.0/xsd/DataTypes.v2.0.xsd">
+
+  <data-type:custom_info>
+    <author>
+      <name>Guillaume Pelletier</name>
+      <role>MSc candidate</role>
+      <purpose>Master's thesis</purpose>
+    </author>
+    <date>June 2018</date>
+    <institution>
+      <name>Université de Moncton</name>
+      <faculty>Faculté des sciences</faculty>
+      <department>Département de chimie et biochimie</department>
+    </institution>
+    <supervisors>
+      <li>Luc H Boudreau</li>
+      <li>Sandra Turcotte</li>
+    </supervisors>
+    <collaborators>
+      <li>Patrick Roy</li>
+      <li>Jean-Luc Jougleux</li>
+      <li>Jacob Léger</li>
+      <li>Annick Beaulieu</li>
+      <li>Camille Pernègre</li>
+      <li>Alexandre LeBlanc</li>
+    </collaborators>
+  </data-type:custom_info>
+
+  <!-- SPILLOVER COMPENSATION MATRIX
+
+            FL1.Lin FL2.Lin FL3.Lin FL4.Lin FL5.Lin
+    FL1.Lin   1.000   0.000   0.000   0.016   0.000
+    FL2.Lin   0.005   0.010   0.000   0.000   0.000
+    FL3.Lin   0.052   0.000   0.010   0.026   0.000
+    FL4.Lin   0.000   0.000   0.000   0.010   0.000
+    FL5.Lin   0.000   0.000   0.000   0.250   0.010
+
+    Note: diagonal must be 1.0, and other values range from 0 to 1 instead of 0% to 100%
+
+  -->
+
+  <transforms:spectrumMatrix transforms:id="Compensation">
+    <transforms:fluorochromes>
+      <data-type:fcs-dimension data-type:name="FITC" />
+      <data-type:fcs-dimension data-type:name="PE" />
+      <data-type:fcs-dimension data-type:name="FL3" />
+      <data-type:fcs-dimension data-type:name="MitoTracker Deep Red FM" />
+      <data-type:fcs-dimension data-type:name="FL5" />
+    </transforms:fluorochromes>
+    <transforms:detectors>
+      <data-type:fcs-dimension data-type:name="FL1.Lin" />
+      <data-type:fcs-dimension data-type:name="FL2.Lin" />
+      <data-type:fcs-dimension data-type:name="FL3.Lin" />
+      <data-type:fcs-dimension data-type:name="FL4.Lin" />
+      <data-type:fcs-dimension data-type:name="FL5.Lin" />
+    </transforms:detectors>
+    <transforms:spectrum>
+      <transforms:coefficient transforms:value="1.000" /> <!-- FL1 -->
+      <transforms:coefficient transforms:value="0" />
+      <transforms:coefficient transforms:value="0" />
+      <transforms:coefficient transforms:value="0.016" /> <!-- FL1 into FL4 -->
+      <transforms:coefficient transforms:value="0" />
+    </transforms:spectrum>
+    <transforms:spectrum>
+      <transforms:coefficient transforms:value="0.005" /> <!-- FL2 into FL1 -->
+      <transforms:coefficient transforms:value="1.000" /> <!-- FL2 -->
+      <transforms:coefficient transforms:value="0" />
+      <transforms:coefficient transforms:value="0" />
+      <transforms:coefficient transforms:value="0" />
+    </transforms:spectrum>
+    <transforms:spectrum>
+      <transforms:coefficient transforms:value="0.052" /> <!-- FL3 into FL1 -->
+      <transforms:coefficient transforms:value="0" />
+      <transforms:coefficient transforms:value="1.000" /> <!-- FL3 -->
+      <transforms:coefficient transforms:value="0.026" /> <!-- FL3 into FL4 -->
+      <transforms:coefficient transforms:value="0" />
+    </transforms:spectrum>
+    <transforms:spectrum>
+      <transforms:coefficient transforms:value="0" />
+      <transforms:coefficient transforms:value="0" />
+      <transforms:coefficient transforms:value="0" />
+      <transforms:coefficient transforms:value="1.000" /> <!-- FL4 -->
+      <transforms:coefficient transforms:value="0" />
+    </transforms:spectrum>
+    <transforms:spectrum>
+      <transforms:coefficient transforms:value="0" />
+      <transforms:coefficient transforms:value="0" />
+      <transforms:coefficient transforms:value="0" />
+      <transforms:coefficient transforms:value="0.250" /> <!-- FL5 into FL4 -->
+      <transforms:coefficient transforms:value="1.000" /> <!-- FL5 -->
+    </transforms:spectrum>
+  </transforms:spectrumMatrix>
+
+  <!-- TRANSFORMATIONS -->
+
+  <transforms:transformation transforms:id="myLogicle">
+    <transforms:logicle transforms:T="10000" transforms:M="4.5" transforms:W="0.5" transforms:A="0" />
+  </transforms:transformation>
+
+  <!-- GATE DEFINITIONS -->
+
+  <gating:RectangleGate gating:id="boundary" gating:parent_id="root">
+    <gating:dimension gating:min="1" gating:max="1022" gating:compensation-ref="uncompensated">
+      <data-type:fcs-dimension data-type:name="FS.Log" />
+    </gating:dimension>
+    <gating:dimension gating:min="1" gating:max="1022" gating:compensation-ref="uncompensated">
+      <data-type:fcs-dimension data-type:name="SS.Log" />
+    </gating:dimension>
+  </gating:RectangleGate>
+
+  <gating:RectangleGate gating:id="nonNoise" gating:parent_id="boundary">
+    <gating:dimension gating:min="360" gating:max="1023" gating:compensation-ref="uncompensated">
+      <data-type:fcs-dimension data-type:name="FS.Log" />
+    </gating:dimension>
+    <gating:dimension gating:min="300" gating:max="1023" gating:compensation-ref="uncompensated">
+      <data-type:fcs-dimension data-type:name="SS.Log" />
+    </gating:dimension>
+  </gating:RectangleGate>
+
+  <gating:RectangleGate gating:id="beadsA" gating:parent_id="nonNoise">
+    <gating:dimension gating:min="800" gating:max="850" gating:compensation-ref="uncompensated">
+      <data-type:fcs-dimension data-type:name="FS.Log" />
+    </gating:dimension>
+    <gating:dimension gating:min="890" gating:max="1023" gating:compensation-ref="uncompensated">
+      <data-type:fcs-dimension data-type:name="SS.Log" />
+    </gating:dimension>
+  </gating:RectangleGate>
+
+  <gating:RectangleGate gating:id="beadsB" gating:parent_id="nonNoise">
+    <gating:dimension gating:min="0" gating:max="1023" gating:compensation-ref="uncompensated">
+      <data-type:fcs-dimension data-type:name="FL5.Log" />
+    </gating:dimension>
+    <gating:dimension gating:min="300" gating:max="1023" gating:compensation-ref="uncompensated">
+      <data-type:fcs-dimension data-type:name="SS.Lin" />
+    </gating:dimension>
+  </gating:RectangleGate>
+
+  <gating:BooleanGate gating:id="beads" gating:parent_id="nonNoise">
+    <gating:and>
+      <gating:gateReference gating:ref="beadsA" />
+      <gating:gateReference gating:ref="beadsB" />
+    </gating:and>
+  </gating:BooleanGate>
+
+  <gating:BooleanGate gating:id="nonBeads" gating:parent_id="nonNoise">
+    <gating:not>
+      <gating:gateReference gating:ref="Beads" />
+    </gating:not>
+  </gating:BooleanGate>
+
+  <gating:BooleanGate gating:id="events" gating:parent_id="nonNoise">
+    <gating:and>
+      <gating:gateReference gating:ref="nonNoise" />
+      <gating:gateReference gating:ref="nonBeads" />
+    </gating:and>
+  </gating:BooleanGate>
+
+  <gating:PolygonGate gating:id="cd24neg" gating:parent_id="events">
+    <gating:dimension gating:compensation-ref="uncompensated">
+      <data-type:fcs-dimension data-type:name="FS.Log" />
+    </gating:dimension>
+    <gating:dimension gating:compensation-ref="uncompensated">
+      <data-type:fcs-dimension data-type:name="FL2.Log" />
+    </gating:dimension>
+    <gating:vertex>
+      <gating:coordinate data-type:value="350" />
+      <gating:coordinate data-type:value="345" />
+    </gating:vertex>
+    <gating:vertex>
+      <gating:coordinate data-type:value="1023" />
+      <gating:coordinate data-type:value="750" />
+    </gating:vertex>
+    <gating:vertex>
+      <gating:coordinate data-type:value="1023" />
+      <gating:coordinate data-type:value="0" />
+    </gating:vertex>
+    <gating:vertex>
+      <gating:coordinate data-type:value="0" />
+      <gating:coordinate data-type:value="0" />
+    </gating:vertex>
+  </gating:PolygonGate>
+
+  <gating:PolygonGate gating:id="cd24pos" gating:parent_id="events">
+    <gating:dimension gating:compensation-ref="uncompensated">
+      <data-type:fcs-dimension data-type:name="FS.Log" />
+    </gating:dimension>
+    <gating:dimension gating:compensation-ref="uncompensated">
+      <data-type:fcs-dimension data-type:name="FL2.Log" />
+    </gating:dimension>
+    <gating:vertex>
+      <gating:coordinate data-type:value="350" />
+      <gating:coordinate data-type:value="345" />
+    </gating:vertex>
+    <gating:vertex>
+      <gating:coordinate data-type:value="1023" />
+      <gating:coordinate data-type:value="750" />
+    </gating:vertex>
+    <gating:vertex>
+      <gating:coordinate data-type:value="1023" />
+      <gating:coordinate data-type:value="1023" />
+    </gating:vertex>
+    <gating:vertex>
+      <gating:coordinate data-type:value="350" />
+      <gating:coordinate data-type:value="1023" />
+    </gating:vertex>
+  </gating:PolygonGate>
+
+  <gating:PolygonGate gating:id="cd24mid" gating:parent_id="cd24pos">
+    <gating:dimension gating:compensation-ref="uncompensated">
+      <data-type:fcs-dimension data-type:name="FS.Log" />
+    </gating:dimension>
+    <gating:dimension gating:compensation-ref="uncompensated">
+      <data-type:fcs-dimension data-type:name="FL2.Log" />
+    </gating:dimension>
+    <gating:vertex>
+      <gating:coordinate data-type:value="350" />
+      <gating:coordinate data-type:value="345" />
+    </gating:vertex>
+    <gating:vertex>
+      <gating:coordinate data-type:value="1023" />
+      <gating:coordinate data-type:value="750" />
+    </gating:vertex>
+    <gating:vertex>
+      <gating:coordinate data-type:value="1023" />
+      <gating:coordinate data-type:value="1023" />
+    </gating:vertex>
+    <gating:vertex>
+      <gating:coordinate data-type:value="780" />
+      <gating:coordinate data-type:value="1023" />
+    </gating:vertex>
+    <gating:vertex>
+      <gating:coordinate data-type:value="350" />
+      <gating:coordinate data-type:value="560" />
+    </gating:vertex>
+  </gating:PolygonGate>
+
+  <gating:PolygonGate gating:id="cd24hi" gating:parent_id="cd24pos">
+    <gating:dimension gating:compensation-ref="uncompensated">
+      <data-type:fcs-dimension data-type:name="FS.Log" />
+    </gating:dimension>
+    <gating:dimension gating:compensation-ref="uncompensated">
+      <data-type:fcs-dimension data-type:name="FL2.Log" />
+    </gating:dimension>
+    <gating:vertex>
+      <gating:coordinate data-type:value="350" />
+      <gating:coordinate data-type:value="560" />
+    </gating:vertex>
+    <gating:vertex>
+      <gating:coordinate data-type:value="780" />
+      <gating:coordinate data-type:value="1023" />
+    </gating:vertex>
+    <gating:vertex>
+      <gating:coordinate data-type:value="350" />
+      <gating:coordinate data-type:value="1023" />
+    </gating:vertex>
+  </gating:PolygonGate>
+
+</gating:Gating-ML>

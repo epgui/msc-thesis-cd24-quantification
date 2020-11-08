@@ -1,0 +1,3535 @@
+---
+title: |
+  | Characterization of 786-O and 786-O/VHL
+  | Cell-Derived Extracellular Vesicle Subpopulations
+  |
+  | PART I - CD24 MEASUREMENT
+  | USING FLOW CYTOMETRY
+  |
+  | Supplementary Information:
+subtitle: "Data analysis and annotated source code"
+author: "Guillaume Pelletier"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+tags: [nothing, nothingness]
+abstract: |
+  | In this analysis, we suggest a "best practices" method using open-source software (R/bioconductor) for analyzing small-particle flow cytometry data in respect to the potential biases attributed to the "swarm effect". A special experimental design is required for analysis of the swarm effect in samples containing small particles, an example of which is described here.
+  | A deconvolution technique is applied for the first time to the analysis of swarm effect on population counts using maximum-likelihood (ML) expectation-maximization (EM) estimates for mixed distribution modeling. Constraints derived from experimental design allows for simplification of distribution parameters. We implement a noise-reduction technique to minimize noise-related artefacts across sample dilutions. We suggest a simple statistical method for interpreting population count differences across samples and across sample dilutions.
+  | The results of significance testing for our data appear to indicate a statistically significant difference between 786-O and VHL cell-derived extracellular vesicles for the absolute count of CD24mid events, as well as for the overall proportion of CD24+ events and the overall proportion of CD24mid events. While multiple comparisons statistical testing reveals no significant differences in CD24hi population counts, fingerprinting reveals that most of the overall between-sample variation occurs in the CD24hi region. Lack of significance is perhaps owing to the difficulty of detecting rare events in very dilute samples. These data also provide with a better understanding of below-threshold particle size differences between samples: in particular, 786-O cells are found to generate significantly more CD24hi EVs smaller than the size detection threshold of the instrument compared to 786-O/VHL EVs.
+  |
+  | Special thanks to Pr Luc H Boudreau, Pr Sandra Turcotte, the Atlantic Cancer Research Institute, NBIF and Mr David G Sebolsky for supporting this research.
+output: 
+  pdf_document: 
+    fig_caption: yes
+    highlight: tango
+    keep_tex: yes
+    latex_engine: xelatex
+    number_sections: yes
+    toc: yes
+    toc_depth: 6
+mainfont: Minion Pro
+sansfont: Helvetica Neue Light
+monofont: Menlo
+header-includes:
+- \usepackage{booktabs}
+- \usepackage{longtable}
+- \usepackage{array}
+- \usepackage{multirow}
+- \usepackage{wrapfig}
+- \usepackage{float}
+- \usepackage{colortbl}
+- \usepackage{pdflscape}
+- \usepackage{tabu}
+- \usepackage{threeparttable}
+- \usepackage{threeparttablex}
+- \usepackage[normalem]{ulem}
+- \usepackage{makecell}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  fig.width=12,
+  fig.height=8,
+  fig.path="Figs/",
+  echo=FALSE,
+  warning=FALSE,
+  message=FALSE,
+  dev="pdf"
+)
+```
+
+
+\newpage
+
+# Production environment
+
+## Required libraries
+
+In order to install all of the required libraries listed below, you will first need to source from **bioconductor**. For more information about **bioconductor**, please visit [https://www.bioconductor.com/](http://www.bioconductor.com/).
+
+When troubleshooting any of the following code, please note that the order of library imports matters, as certain packages may interfere with each other in unpredictable ways.
+
+```{r libraries, echo=TRUE}
+
+library("Biobase")
+library("gridExtra")
+library("reshape2")
+library("HH")
+library("mixtools")
+library("diptest")
+library("ggplot2")
+library("dplyr")
+library("tidyr")
+library("purrr")
+library("car")
+
+# Flow cytometry specific packages
+library("flowCore")
+library("flowWorkspace")
+library("flowUtils")
+library("flowStats")
+library("flowFP")
+library("MetaCyto")
+library("ggcyto")
+
+# Used to generate this annotated PDF report
+# https://haozhu233.github.io/kableExtra/awesome_table_in_pdf.pdf
+library("kableExtra")
+library("pander")
+library("knitr")
+
+```
+
+\newpage
+
+## SessionInfo()
+
+This may be useful for troubleshooting and is included for the sake of reproducibility.
+
+```{r environment, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE}
+
+pander::pander(utils::sessionInfo(), locale=TRUE, compact=TRUE)
+
+```
+
+
+\newpage
+
+## Global variables and convenience functions
+
+```{r globalVariables, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE}
+
+# This is where all my data files reside on my local machine
+setwd("/Users/gp/Documents/Maitrise/Results/N3L2/CD24 quantification/")
+
+# The following colours are used consistently enough in this document
+colorPalette <- list(
+  "red"   = "#E87D72",
+  "blue"  = "#54BCC2",
+  "green" = "#00AA00"
+)
+
+
+# Output dataframe in PDF-friendly format
+printDataFrame <- function(dataframe, caption, fontsize=7) {
+  knitr::kable(
+    dataframe,
+    format="latex",
+    booktabs=TRUE,
+    longtable=TRUE,
+    caption=caption
+  ) %>%
+  kableExtra::kable_styling(
+    font_size=fontsize,
+    latex_options=c(
+      "hold position",
+      "repeat_header",
+      "striped"
+    )
+  )
+}
+
+# kmeans() returns an error when one of the clusters turns out empty. Since in
+# context we expect this to happen, we can define more useful behaviour.
+safeClustering <- function(
+  data,
+  centers=matrix(data=c(0, 0, 0, 0), ncol=2),
+  principal=1
+) {
+  # Linter bindings
+  cluster <- NULL
+
+  attemptClustering <- try(
+    expr={
+      km <- stats::kmeans(data, centers=centers)$cluster
+    },
+    silent=TRUE
+  )
+
+  if (class(attemptClustering) == "try-error") {
+    km <- principal
+  }
+
+  km
+}
+
+# This function takes an anova object, the return value of aov(), and returns
+# the p-Value of row 1 (ie.: [[1]])
+getANOVApValue <- function(aov) {
+  summary(aov)[["Error: Within"]][[1]][["Pr(>F)"]][1]
+}
+
+```
+
+
+\newpage
+
+# Data pre-processing
+
+## Experiment meta-data
+
+The **Biobase** package provides a standard class called `AnnotatedDataFrame` to
+store and manipulate the experiment metadata.
+
+**References:**
+
+* [https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4509590/](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4509590/)
+
+**Technical documentation:**
+
+* [https://bioconductor.org/packages/devel/bioc/vignettes/Biobase/inst/doc/ExpressionSetIntroduction.pdf](https://bioconductor.org/packages/devel/bioc/vignettes/Biobase/inst/doc/ExpressionSetIntroduction.pdf)
+* [https://bioconductor.org/packages/devel/bioc/manuals/Biobase/man/Biobase.pdf](https://bioconductor.org/packages/devel/bioc/manuals/Biobase/man/Biobase.pdf)
+
+Experiment metadata is stored in a tab-delimited `.txt` file, which can be read
+using `read.table()`. In this case, as the FC500 instrument does not support
+integration with any of the **bioconductor** tools, the `phenoData.txt` file was
+created by hand in **Microsoft Excel**. Alternatively, any other plain text
+editor may be used. Let's take a look at the contents of this file:
+
+```{r phenoData, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE}
+
+pData <- utils::read.table(
+  file="phenoData.txt",
+  header=TRUE,
+  row.names=1,
+  sep="\t",
+  as.is=TRUE
+)
+
+printDataFrame(
+  pData,
+  "phenoData.txt",
+  fontsize=7
+)
+
+```
+
+The row labels correspond to the path of all the sample data files (relative to
+`getwd()`, as defined previously with `setwd()`). There are two cell lines in
+this experiment: the ATCC 786-O renal cell carcinoma cell line, as well as a
+786-O/VHL line with functional VHL gene. We can see that this experiment
+features biological triplicates, and that each sample is measured in serial
+dilutions of 1:20, 1:60, 1:100, 1:140, 1:180 and 1:220. The experimental
+conditions corresponding to each sample file are otherwise identical (adherent
+cells are incubated with 1 uM A23187 in serum-starved medium for 4 hours before
+conditioned medium is collected, processed and analyzed).
+
+The variables `facetRow` and `facetCol` have been added for convenience, as
+these data will be organized in an ordered grid, much like a plate. Let's label
+our experiment columns and rows while we're at it: these labels will be used for
+plotting later on.
+
+```{r facetLabels, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE}
+
+# To make the faceted graph easier to interpret we can label columns and rows
+facetLabels <- c(
+  "c1"    = "1:20",
+  "20"    = "1:20",
+  "c2"    = "1:60",
+  "60"    = "1:60",
+  "c3"    = "1:100",
+  "100"   = "1:100",
+  "c4"    = "1:140",
+  "140"   = "1:140",
+  "c5"    = "1:180",
+  "180"   = "1:180",
+  "c6"    = "1:220",
+  "220"   = "1:220",
+  "r1"    = "786 n1",
+  "r2"    = "786 n2",
+  "r3"    = "786 n3",
+  "786-O" = "786-O (n=3)",
+  "r4"    = "VHL n1",
+  "r5"    = "VHL n2",
+  "r6"    = "VHL n3",
+  "VHL"   = "786-O/VHL (n=3)"
+)
+
+```
+
+The `AnnotatedDataFrame` is then created directly from `pData`, an object of type `DataFrame`.
+
+```{r annotatedDataFrame, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE}
+
+# Otherwise flowCore::read.flowSet() doesn't work
+pData$filename <- row.names(pData)
+
+phenoData <- new(
+  "AnnotatedDataFrame",
+  data=pData,
+  varMetadata=data.frame(
+    labelDescription=BiocGenerics::colnames(pData),
+    row.names=BiocGenerics::colnames(pData)
+  )
+)
+
+phenoData
+
+```
+
+
+
+\newpage
+
+## Basic data structure
+
+### Creating a FlowSet
+
+At this stage, we use our `AnnotatedDataFrame` to create a `FlowSet` for our
+experiment. A `FlowSet` is simply a collection of related `FlowFrame` objects
+which store individual measurements. Each row in `pData` contains the file path
+of each individual measurement that comprises a `FlowFrame` within the
+`FlowSet`. As we will see later, a `FlowFrame` object can be plotted or
+manipulated on its own, or a `FlowSet` object can be used to plot or manipulate
+a collection of `FlowFrames` in a consistent fashion. In other words, in
+**flowCore** parlance a `FlowFrame` is a flow cytometry measurement (which
+corresponds to a single row in the `pData`) whereas a `FlowSet` could be an
+entire experiment made up of many samples (which corresponds to the collection
+of all rows in the `pData`). See the **flowCore** package for more in-depth
+explanations.
+
+```{r flowset, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE}
+
+# Load all samples into memory as a flowSet object
+flowset <- flowCore::read.flowSet(
+  path=getwd(),
+  dataset=1,
+  transformation=FALSE,
+  alter.names=TRUE,
+  phenoData=phenoData
+)
+
+flowset
+```
+
+There are other ways to access flow data in R, however I have found this method
+to be the most elegant. Loading `FlowSet` data using an `AnnotatedDataFrame` has
+the following advantages:
+
+* __Clearer experimental design:__ the experiment metadata explicitly defined in
+the `AnnotatedDataFrame` should clarify the experimental design.
+* __Better code separation:__ the file paths are all located in an external
+tab-delimited `.txt` file rather than being defined at any given location within
+the source code itself. File handling can otherwise take up a significant number
+of lines of code.
+* __Cleaner code:__ with this method, an entire experiment is set up within a
+`FlowSet` in one command, without the need for repetitive code for file handling
+or cumbersome operations on individual `FlowFrame` objects.
+
+
+### Constructing a minimal GatingSet
+
+While the `FlowSet` contains the actual data for the experiment, we need a means
+to construct and manipulate a gating tree. This is where the `GatingSet` object
+provided by the **flowWorkspace** package comes in. A `GatingSet` object
+contains a reference to a `FlowSet` experiment, as well as additional objects
+such as transformations (eg.: linear, log, biexponential, logicle, etc),
+compensation matrices, gates, as well as population statistics in the gating
+tree. The **flowWorkspace** tools allow for non-destructive manipulation of flow
+cytometry data and integrate very well with **flowJo** (which is of little help
+to me, but is still noteworthy).
+
+The ideal workflow as of writing this appears to be creating an XML workspace
+with the **flowJo** commercial software in order to import directly into a fully
+constructed `GatingSet` object. Unfortunately, **flowWorkspace** does not yet
+appear to support importing of standard GatingML-compliant files, although as we
+will see, some limited support for this is offered by **flowUtils**.
+
+**Technical documentation:**
+
+* [https://www.bioconductor.org/packages/release/bioc/html/flowWorkspace.html](https://www.bioconductor.org/packages/release/bioc/html/flowWorkspace.html)
+
+We start by constructing a minimal `GatingSet` for the experiment.
+
+```{r gatingset, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=FALSE}
+
+gatingset <- flowWorkspace::GatingSet(flowset)
+gatingset
+
+```
+
+This `GatingSet` is currently quite useless, but we will be making good use of
+it shortly.
+
+
+### Accessing instrument settings
+
+While this section may at first glance appear unimportant or to be full of
+gibberish and utter nonsense, there are at least two good reasons for diving
+into the instrument settings included in `.FCS` or `.LMD` files:
+
+* __Low-level data access:__ **TODO: Include explanation of all the things you can find in there**
+* __MIFlowCyt:__ https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2773297/
+
+As per MIFlowCyt, the following list of instrument and acquisition parameters is
+included for informational purposes.
+
+```{r instrument, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=FALSE}
+
+# Extract experiment's instrument metadata
+keywords <- flowCore::keyword(gatingset[[1]])
+
+# Format
+keywordsDataFrame <- data.frame(BiocGenerics::t(data.frame(keywords)))
+keywordsDataFrame$key <- BiocGenerics::rownames(keywordsDataFrame)
+keywordsDataFrame <- keywordsDataFrame[c(2, 1)] # Reorder columns
+
+BiocGenerics::colnames(keywordsDataFrame) <- c("key", "value")
+BiocGenerics::rownames(keywordsDataFrame) <- c()
+
+# Print
+printDataFrame(
+  keywordsDataFrame,
+  "Instrument settings",
+  fontsize=6
+)
+
+```
+
+
+\newpage
+
+## GatingML
+
+```{r gatingMLsetup, echo=TRUE, results="markup", include=TRUE, warning=FALSE, message=FALSE}
+
+flowEnv <- new.env()
+flowUtils::read.gatingML("GatingML.xml", flowEnv)
+
+```
+
+
+### Applying the gating tree onto the GatingSet
+
+In theory, with an appropriate GatingML-compliant file this should be incredibly
+straightforward. However, support for standard GatingML-compliant files in
+**flowWorkspace** is nonexistent. From what I have been able to figure out,
+support for this in **flowUtils** is either broken, incomplete or improperly
+documented. As a result, the following code is not as elegant a demonstration as
+it could be, but this should not detract from the fact that the R/bioconductor
+open sourcee flow cytometry tools are extremely powerful.
+
+**References:**
+
+* [https://onlinelibrary.wiley.com/doi/epdf/10.1002/cyto.a.20637](https://onlinelibrary.wiley.com/doi/epdf/10.1002/cyto.a.20637)
+
+**Technical documentation:**
+
+* [http://flowcyt.sourceforge.net/gating/latest.pdf](http://flowcyt.sourceforge.net/gating/latest.pdf)
+* [http://bioconductor.riken.jp/packages/3.7/bioc/manuals/flowUtils/man/flowUtils.pdf](http://bioconductor.riken.jp/packages/3.7/bioc/manuals/flowUtils/man/flowUtils.pdf)
+
+Let's begin this mess by defining two convenience functions (which I hope to get
+rid of in the near future). We can then construct a gating tree from the gates
+defined in the GatingML file.
+
+```{r GatingML, echo=TRUE, results="hide", include=TRUE, warning=FALSE, message=FALSE}
+
+getGate <- function(gateName) {
+  flowEnv[[gateName]]@filters[[1]]
+}
+
+getGateParent <- function(gateName) {
+  flowEnv[[gateName]]@filters[[2]]@name
+}
+
+flowWorkspace::gs_pop_add(
+  gs=gatingset,
+  gate=getGate("boundary"),
+  parent=getGateParent("boundary")
+)
+
+flowWorkspace::gs_pop_add(
+  gs=gatingset,
+  gate=getGate("nonNoise"),
+  parent=getGateParent("nonNoise")
+)
+
+flowWorkspace::gs_pop_add(
+  gs=gatingset,
+  gate=getGate("beadsA"),
+  parent=getGateParent("beadsA")
+)
+
+flowWorkspace::gs_pop_add(
+  gs=gatingset,
+  gate=getGate("beadsB"),
+  parent=getGateParent("beadsB")
+)
+
+flowWorkspace::gs_pop_add(
+  gs=gatingset,
+  gate=flowWorkspace::booleanFilter(`beadsA & beadsB`),
+  name="beads",
+  parent="nonNoise"
+)
+
+flowWorkspace::gs_pop_add(
+  gs=gatingset,
+  gate=flowWorkspace::booleanFilter(`nonNoise & !beads`),
+  name="events",
+  parent="nonNoise"
+)
+
+flowWorkspace::gs_pop_add(
+  gs=gatingset,
+  gate=getGate("cd24pos"),
+  parent=getGateParent("cd24pos")
+)
+
+flowWorkspace::gs_pop_add(
+  gs=gatingset,
+  gate=getGate("cd24neg"),
+  parent=getGateParent("cd24neg")
+)
+
+flowWorkspace::gs_pop_add(
+  gs=gatingset,
+  gate=getGate("cd24mid"),
+  parent=getGateParent("cd24mid")
+)
+
+flowWorkspace::gs_pop_add(
+  gs=gatingset,
+  gate=getGate("cd24hi"),
+  parent=getGateParent("cd24hi")
+)
+
+```
+
+
+Because individually they are completely irrelevant to our analysis, we can hide
+the "helper" bead count nodes from our gating tree, instead focusing on the
+semantically more useful `beads` boolean gate. We can then apply the gating tree
+to the `GatingSet`: this will also compute population statistics down the tree.
+
+```{r applyGatingTree, echo=TRUE, results="hide", include=TRUE, warning=FALSE, message=FALSE}
+
+invisible(flowWorkspace::gs_pop_set_visibility(gatingset, "beadsA", FALSE))
+invisible(flowWorkspace::gs_pop_set_visibility(gatingset, "beadsB", FALSE))
+
+# Apply the gating tree to the underlying data
+flowWorkspace::recompute(gatingset)
+
+```
+
+We can then plot the gating tree in order to visualize the general gating
+strategy for this experiment.
+
+```{r plotGatingTree, echo=TRUE, results="markup", include=TRUE, warning=FALSE, message=FALSE, fig.width=12, fig.height=3.5}
+
+plot(gatingset, bool=TRUE)
+
+```
+
+
+## Data normalization
+
+There is some purely instrumental variability: beads sometimes appear at
+slightly different locations, so we normalize for this here.
+
+**References:**
+
+* https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3648208/
+
+**Technical documentation:**
+
+* https://bioconductor.org/packages/release/bioc/manuals/flowStats/man/flowStats.pdf
+
+```{r normalization, echo=FALSE, results="markup", include=TRUE, warning=TRUE, message=FALSE}
+
+gatingset <- flowStats::normalize(
+  data=gatingset,
+  populations=c("boundary", "beadsA"),
+  dims=c("FS.Log", "SS.Log"),
+  nPeaks=list("boundary"=2, "beadsA"=1)
+)
+
+```
+
+
+\newpage
+
+# Data visualization
+
+## Single sample morphology plot
+
+Gated cytometry data can be plotted with ggCyto.
+
+```{r basicDataVisualization, echo=TRUE, results="markup", include=TRUE, warning=FALSE, message=TRUE, fig.width=4, fig.height=4}
+
+ggcyto::ggcyto(
+  data=gatingset[[1]],
+  mapping=ggplot2::aes(
+    x=SS.Log,
+    y=FS.Log),
+  subset="root"
+) +
+  ggplot2::geom_hex(bins=256) +
+  ggplot2::scale_x_continuous(expand=c(0, 0)) +
+  ggplot2::scale_y_continuous(expand=c(0, 0)) +
+  ggcyto::geom_gate("boundary") +
+  ggcyto::geom_gate("nonNoise") +
+  ggcyto::geom_gate("beadsA") +
+  ggplot2::theme(
+    legend.position="none",
+    panel.background=ggplot2::element_rect(fill="#F4F4F4"),
+    panel.grid.major.x=ggplot2::element_blank(),
+    panel.grid.minor.x=ggplot2::element_blank(),
+    panel.grid.major.y=ggplot2::element_blank(),
+    panel.grid.minor.y=ggplot2::element_blank(),
+    panel.spacing=grid::unit(0.1, units="lines"),
+    axis.text.x=ggplot2::element_blank(),
+    axis.text.y=ggplot2::element_blank(),
+    axis.ticks=ggplot2::element_blank())
+
+```
+
+
+\newpage
+
+## Whole experiment morphology plot
+
+Let's plot the entire Gatingset so we can visualize the morphology plane on all
+samples simultaneously!
+
+```{r gatingSetMorphology, echo=TRUE, results="markup", include=TRUE, warning=FALSE, message=TRUE, fig.width=12, fig.height=12}
+
+ggcyto::ggcyto(
+  data=gatingset,
+  mapping=ggplot2::aes(
+    x=SS.Log,
+    y=FS.Log),
+  subset="root"
+) +
+  ggplot2::labs(
+    title="Stratégie de gating sur les paramètres de morphologie",
+    subtitle=paste0(
+      "Élimination des évènements en bordure, élimination du bruit et",
+      "identification des billes de comptage"),
+    x="FS-Log",
+    y="SS-Log") +
+  ggplot2::geom_hex(bins=128) +
+  ggcyto::geom_gate("boundary") +
+  ggcyto::geom_gate("nonNoise") +
+  ggcyto::geom_gate("beadsA") +
+  ggplot2::facet_grid(
+    rows=dplyr::vars(facetRow),
+    cols=dplyr::vars(facetCol),
+    labeller=ggplot2::as_labeller(facetLabels)) +
+  ggplot2::theme(
+    legend.position="none",
+    panel.background=ggplot2::element_rect(fill="#F4F4F4"),
+    panel.grid.major.x=ggplot2::element_blank(),
+    panel.grid.minor.x=ggplot2::element_blank(),
+    panel.grid.major.y=ggplot2::element_blank(),
+    panel.grid.minor.y=ggplot2::element_blank(),
+    panel.spacing=grid::unit(0.1, units="lines"),
+    axis.text.x=ggplot2::element_blank(),
+    axis.text.y=ggplot2::element_blank(),
+    axis.ticks=ggplot2::element_blank())
+
+```
+
+
+\newpage
+
+## Auxiliary bead gate visualization
+
+Visualizing the auxiliary bead gates:
+
+```{r auxiliaryBeadGate, echo=TRUE, results="markup", include=TRUE, warning=FALSE, message=TRUE, fig.width=12, fig.height=12}
+
+gatingset <- flowStats::normalize(
+  data=gatingset,
+  populations=c("beadsB"),
+  dims=c("SS.Lin"),
+  minCountThreshold=100
+)
+
+ggcyto::ggcyto(
+  data=gatingset,
+  mapping=ggplot2::aes(
+    x=SS.Lin,
+    y=FL5.Log),
+  subset="nonNoise"
+) +
+  ggplot2::labs(
+    title="Stratégie de gating pour l'élimination des beads",
+    subtitle="Gating auxiliaire des billes de comptage",
+    x="SS-Lin",
+    y="FL5-Log (Blanc)") +
+  ggplot2::geom_hex(bins=64) +
+  ggcyto::geom_gate("beadsB") +
+  ggcyto::geom_stats(
+    size=2.7,
+    type="count") +
+  ggplot2::facet_grid(
+    rows=dplyr::vars(facetRow),
+    cols=dplyr::vars(facetCol),
+    labeller=ggplot2::as_labeller(facetLabels)) +
+  ggplot2::theme(
+    legend.position="none",
+    panel.background=ggplot2::element_rect(fill="#F4F4F4"),
+    panel.grid.major.x=ggplot2::element_blank(),
+    panel.grid.minor.x=ggplot2::element_blank(),
+    panel.grid.major.y=ggplot2::element_blank(),
+    panel.grid.minor.y=ggplot2::element_blank(),
+    panel.spacing=grid::unit(0.1, units="lines"),
+    axis.text.x=ggplot2::element_blank(),
+    axis.text.y=ggplot2::element_blank(),
+    axis.ticks=ggplot2::element_blank())
+
+```
+
+
+\newpage
+
+## Whole experiment fluorescence with event counts
+
+And finally, let's visualize the non-bead events on the fluorescence channel (anti-CD24 antibodies)
+
+```{r visualizeNonBeadFluorescence, echo=TRUE, results="markup", include=TRUE, warning=FALSE, message=TRUE, fig.width=12, fig.height=12}
+
+ggcyto::ggcyto(
+  data=gatingset,
+  mapping=ggplot2::aes(
+    x=FS.Log,
+    y=FL2.Log),
+  subset="events"
+) +
+  ggplot2::labs(
+    title="Quantification des microparticules marquées au CD24-PE",
+    subtitle=paste0(
+      "Comparaison des 786-O (n=3) et des 786-O/VHL (n=3). ",
+      "[Gated: events]"
+    ),
+    x="FS-Log",
+    y="FL2-Log (CD24-PE)") +
+  ggplot2::geom_hex(bins=64) +
+  ggcyto::geom_gate(c(
+    "cd24hi",
+    "cd24mid",
+    "cd24neg")) +
+  ggcyto::geom_stats(
+    color="#FFFFFF",
+    fill="#000000",
+    size=5,
+    fontface="bold",
+    type="count") +
+  ggplot2::facet_grid(
+    rows=dplyr::vars(facetRow),
+    cols=dplyr::vars(facetCol),
+    labeller=ggplot2::as_labeller(facetLabels)) +
+  ggplot2::theme(
+    legend.position="none",
+    panel.background=ggplot2::element_rect(fill="#F4F4F4"),
+    panel.grid.major.x=ggplot2::element_blank(),
+    panel.grid.minor.x=ggplot2::element_blank(),
+    panel.grid.major.y=ggplot2::element_blank(),
+    panel.grid.minor.y=ggplot2::element_blank(),
+    panel.spacing=grid::unit(0.1, units="lines"),
+    axis.text.x=ggplot2::element_blank(),
+    axis.text.y=ggplot2::element_blank(),
+    axis.ticks=ggplot2::element_blank())
+
+```
+
+
+\newpage
+
+# Analysis
+
+## Data-driven methods
+
+### Fingerprinting
+
+Fingerprinting is a quick and easy way to observe population-agnostic, data-driven differences between a large number of samples.
+
+**References:**
+
+* https://www.ncbi.nlm.nih.gov/pubmed/19956416
+
+**Technical documentation:**
+
+*https://bioconductor.org/packages/release/bioc/vignettes/flowFP/inst/doc/flowFP_HowTo.pdf
+
+```{r fingerprintingModel, echo=TRUE, results="markup", include=TRUE, warning=FALSE, message=TRUE, fig.width=3.5, fig.height=4}
+
+# Remove all irrelevant populations, such as beads and noise
+fingerprintingData <- flowWorkspace::gs_pop_get_data(gatingset, "events")
+fingerprintingData <- flowWorkspace::cytoset_to_flowSet(fingerprintingData)
+
+# Generate a fingerprinting model with the data in the "events"-gated FlowSet
+fingerprintingModel <- flowFP::flowFPModel(
+  fcs=fingerprintingData,
+  name="CD24/FS.Log Model",
+  parameters=c("FS.Log", "FL2.Log"),
+  nRecursions=6
+)
+
+# Generate fingerprints for all samples
+fingerprints <- flowFP::flowFP(
+  fcs=fingerprintingData,
+  model=fingerprintingModel
+)
+
+# Visualize model
+plot(fingerprintingModel)
+```
+
+\newpage
+
+```{r fingerprintingFingerprints, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=12, fig.height=12}
+
+# Detect outliers
+plot(fingerprints, type="qc", main="Outliers")
+
+```
+
+\newpage
+
+```{r fingerprintingExample, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=7}
+
+# Visualize a specific sample and its outlier bins
+plot(
+  fingerprints,
+  fingerprintingData,
+  hi=1,
+  showbins=c(50, 53, 55, 56, 60),
+  pch=20,
+  cex=0.3,
+  main="Visualization of the outlier bins"
+)
+
+```
+
+
+\newpage
+
+## Swarm deconvolution
+
+This is a novel application of a deconvolution strategy that has been validated in entirely different contexts.
+
+**Reference:**
+
+* http://tinyheero.github.io/2016/01/03/gmm-em.html
+
+**DECONVOLUTION TOOLS:**
+
+* http://journals.plos.org/plosone/article?id=10.1371/journal.pone.0067620
+* https://bioconductor.org/packages/release/bioc/vignettes/flowFit/inst/doc/HowTo-flowFit.pdf
+
+
+### Visualizing the swarm effect
+
+We can back-gate any of our fluorescent populations into a morphology axis:
+
+```{r backGating, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=12, fig.height=12}
+
+# Morphology characteristics of fluorescence-gated data can be visualized to
+# gain quantitative insight into the magnitude of per-subpopulation swarm effect
+ggplot2::ggplot(
+  data=flowWorkspace::gs_pop_get_data(gatingset, "events"),
+  mapping=ggplot2::aes(x=SS.Log)
+) +
+  ggplot2::labs(
+    title="Morphology of CD24 subpopulations by fluorescence intensity",
+    subtitle="Backgated: [CD24neg] (red) / [CD24mid] (blue) / [CD24hi] (green)",
+    x="SS-Log",
+    y="Probability density") +
+  ggplot2::scale_x_continuous(
+    limits=c(0, 1023),
+    expand=c(0, 0)) +
+  ggplot2::geom_density(
+    data=flowWorkspace::gs_pop_get_data(gatingset, "cd24neg"),
+    color="#FF0000AA",
+    fill="red",
+    alpha=0.1) +
+  ggplot2::geom_density(
+    data=flowWorkspace::gs_pop_get_data(gatingset, "cd24hi"),
+    color="#00AA00AA",
+    fill="#00AA00",
+    alpha=0.1) +
+  ggplot2::geom_density(
+    data=flowWorkspace::gs_pop_get_data(gatingset, "cd24mid"),
+    color="#0000FFAA",
+    fill="blue",
+    alpha=0.1) +
+  ggplot2::facet_grid(
+    rows=dplyr::vars(facetRow),
+    cols=dplyr::vars(facetCol),
+    labeller=ggplot2::as_labeller(facetLabels))
+
+```
+
+
+\newpage
+
+It might be easier to visualize this by combining data from all triplicates:
+
+```{r combinedSwarmEffectGraph1, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=12, fig.height=4}
+
+cellLineOrdering <- c("786-O", "VHL")
+dilutionOrdering <- c("20", "60", "100", "140", "180", "220")
+  
+eventsData <- flowWorkspace::gs_pop_get_data(gatingset, "events")
+eventsData <- flowWorkspace::cytoset_to_flowSet(eventsData)
+cd24negData <- flowWorkspace::gs_pop_get_data(gatingset, "cd24neg")
+cd24negData <- flowWorkspace::cytoset_to_flowSet(cd24negData)
+cd24midData <- flowWorkspace::gs_pop_get_data(gatingset, "cd24mid")
+cd24midData <- flowWorkspace::cytoset_to_flowSet(cd24midData)
+cd24hiData <- flowWorkspace::gs_pop_get_data(gatingset, "cd24hi")
+cd24hiData <- flowWorkspace::cytoset_to_flowSet(cd24hiData)
+
+eventsData@phenoData@data$dilution <- factor(
+  eventsData@phenoData@data$dilution,
+  levels=dilutionOrdering)
+cd24negData@phenoData@data$dilution <- factor(
+  cd24negData@phenoData@data$dilution,
+  levels=dilutionOrdering)
+cd24midData@phenoData@data$dilution <- factor(
+  cd24midData@phenoData@data$dilution,
+  levels=dilutionOrdering)
+cd24hiData@phenoData@data$dilution <- factor(
+  cd24hiData@phenoData@data$dilution,
+  levels=dilutionOrdering)
+
+eventsData@phenoData@data$cellLine <- factor(
+  eventsData@phenoData@data$cellLine,
+  levels=cellLineOrdering)
+cd24negData@phenoData@data$cellLine <- factor(
+  cd24negData@phenoData@data$cellLine,
+  levels=cellLineOrdering)
+cd24midData@phenoData@data$cellLine <- factor(
+  cd24midData@phenoData@data$cellLine,
+  levels=cellLineOrdering)
+cd24hiData@phenoData@data$cellLine <- factor(
+  cd24hiData@phenoData@data$cellLine,
+  levels=cellLineOrdering)
+
+ggplot2::ggplot(
+  data=eventsData,
+  mapping=ggplot2::aes(x=SS.Log)
+) +
+  ggplot2::labs(
+    title="Morphology of CD24 subpopulations by fluorescence intensity",
+    subtitle="Backgated: [CD24neg] (red) / [CD24mid] (blue) / [CD24hi] (green)",
+    x="SS-Log",
+    y="Probability density") +
+  ggplot2::scale_x_continuous(
+    limits=c(0, 1023),
+    expand=c(0, 0)) +
+  ggplot2::geom_density(
+    data=cd24negData,
+    color="#FF0000AA",
+    fill="red",
+    alpha=0.1) +
+  ggplot2::geom_density(
+    data=cd24hiData,
+    color="#00AA00AA",
+    fill="#00AA00", # Dark green
+    alpha=0.1) +
+  ggplot2::geom_density(
+    data=cd24midData,
+    color="#0000FFAA",
+    fill="blue",
+    alpha=0.1) +
+  ggplot2::facet_grid(
+    rows=dplyr::vars(cellLine),
+    cols=dplyr::vars(dilution),
+    labeller=ggplot2::as_labeller(facetLabels))
+
+```
+
+
+\newpage
+
+### A step-by-step example: CD24mid swarm deconvolution
+
+#### Mixed distribution modeling
+
+\linebreak
+
+Let's compute the ML estimate of the mixed distribution using an expectation-maximization algorithm
+provided by mixtools. This will serve as an initial estimation of subpopulation characteristics before
+we proceed with model optimization.
+
+**Technical documentation:**
+
+* https://cran.r-project.org/web/packages/mixtools/mixtools.pdf
+* https://cran.r-project.org/web/packages/mixtools/vignettes/mixtools.pdf
+
+```{r deconvolutionStep1, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=7, fig.height=5}
+
+estimate <- list(
+  "mu"    = c(373, 650),
+  "sigma" = c(35.6, 120)
+)
+
+generateSwarmModel <- function(
+  gs,
+  axis="SS.Log",
+  gate="cd24pos",
+  mu=c(0, 0),
+  sigma=c(1, 1),
+  maxIterations=10000
+) {
+  # Linter bindings
+  pNeg <-
+  pPos <-
+  facetRow <-
+  facetCol <- NULL
+
+  numberOfFlowframes <- length(flowWorkspace::sampleNames(gs))
+  swarmModel <- list()
+
+  for (i in seq_len(numberOfFlowframes)) {
+    y <- flowWorkspace::gs_pop_get_data(gs, gate)
+    y <- flowWorkspace::cytoset_to_flowSet(y)
+    y <- y[[i]]@exprs[, axis]
+
+    mixEM <- mixtools::normalmixEM(y, mu=mu, sigma=sigma, maxit=maxIterations)
+
+    # Extract important results obtained from normalmixEM()
+    distribution1 <- c(
+      "mu"         = mixEM$mu[1],
+      "sigma"      = mixEM$sigma[1],
+      "proportion" = mixEM$lambda[1]
+    )
+
+    distribution2 <- c(
+      "mu"         = mixEM$mu[2],
+      "sigma"      = mixEM$sigma[2],
+      "proportion" = mixEM$lambda[2]
+    )
+
+    # Ensure we correctly identify the true positive distribution
+    if (distribution1[["mu"]] < distribution2[["mu"]]) {
+      negDistribution <- distribution1
+      posDistribution <- distribution2
+    } else {
+      negDistribution <- distribution2
+      posDistribution <- distribution1
+    }
+
+    hartigansDipTestStatistic <-
+      diptest::dip.test(y, B=2000, simulate.p.value=FALSE)$p.value
+
+    # Assign values to the appropriate columns
+    swarmModel[[i]] <- c(
+      "id"        = i,
+      "muNeg"     = negDistribution[["mu"]],
+      "sigmaNeg"  = negDistribution[["sigma"]],
+      "pNeg"      = negDistribution[["proportion"]],
+      "muPos"     = posDistribution[["mu"]],
+      "sigmaPos"  = posDistribution[["sigma"]],
+      "pPos"      = posDistribution[["proportion"]],
+      "hartigans" = hartigansDipTestStatistic
+    )
+  }
+
+  # Create the dataframe from all generated values
+  swarmModel <- BiocGenerics::as.data.frame(
+    BiocGenerics::do.call("rbind", swarmModel)
+  )
+
+  # Compute number of events in each distribution
+  swarmModel$nNeg <- round(length(y) * swarmModel$pNeg, digits=0)
+  swarmModel$nPos <- round(length(y) * swarmModel$pPos, digits=0)
+
+  # Population statistics
+  swarmModel$welchTTest <-
+    abs(swarmModel$muNeg - swarmModel$muPos) /
+      sqrt(
+        ((swarmModel$sigmaNeg^4)/swarmModel$nNeg) +
+        ((swarmModel$sigmaPos^4)/swarmModel$nPos))
+
+  # Assign faceting values for plotting convenience
+  swarmModel$facetRow <- pData$facetRow
+  swarmModel$facetCol <- pData$facetCol
+
+  swarmModel
+}
+
+# TODO: mu and sigma may need to be tweaked recursively on a per-experiment
+# basis
+cd24midSwarmModel <- generateSwarmModel(
+  gs=gatingset,
+  axis="SS.Log",
+  gate="cd24mid",
+  mu=estimate$mu,
+  sigma=estimate$sigma,
+  maxIterations=10000
+)
+
+```
+
+
+\newpage
+
+Let's check out how our model data looks so far.
+
+```{r deconvolutionStep2, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=7, fig.height=5}
+
+printDataFrame(
+  dataframe=cd24midSwarmModel,
+  caption=
+    "Swarm deconvolution model: initial ML estimate on a per-sample basis",
+  fontsize=6
+)
+
+```
+
+\newpage
+
+Let's visualize this.
+
+```{r clusterPlotsExplanation, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=10, fig.height=5}
+
+clusterModel <- function(
+  model,
+  centers=matrix(c(0, 0, 0, 0), ncol=2)
+) {
+  numberOfClusters <- BiocGenerics::nrow(centers)
+
+  model$negCluster <- factor(
+    safeClustering(
+      data=model[, c("muNeg", "sigmaNeg")],
+      centers=centers,
+      principal=1
+    ),
+    levels=seq_len(numberOfClusters)
+  )
+
+  model$posCluster <- factor(
+    safeClustering(
+      data=model[, c("muPos", "sigmaPos")],
+      centers=centers,
+      principal=2
+    ),
+    levels=seq_len(numberOfClusters)
+  )
+
+  model
+}
+
+plotModelClusters <- function(model, ylim=c(0, 1023), xlim=c(0, 1023)) {
+  plot1 <- ggplot2::ggplot(
+    data=model,
+    mapping=ggplot2::aes(
+      x=muNeg,
+      y=sigmaNeg,
+      color=negCluster
+    )
+  ) +
+    ggplot2::labs(
+      title="Estimated as negative",
+      x="Estimate for mu",
+      y="Estimate for sigma") +
+    ggplot2::coord_cartesian(
+      ylim=ylim,
+      xlim=xlim) +
+    ggplot2::scale_x_continuous(expand=c(0, 0)) +
+    ggplot2::scale_y_continuous(expand=c(0, 0)) +
+    ggplot2::theme(legend.position="none") +
+    ggplot2::geom_point(size=2) +
+    ggplot2::scale_color_manual(
+      values=c(
+        "1" = colorPalette[["red"]],
+        "2" = colorPalette[["blue"]]
+      ),
+      drop=FALSE)
+
+  plot2 <- ggplot2::ggplot(
+    data=model,
+    mapping=ggplot2::aes(
+      x=muPos,
+      y=sigmaPos,
+      color=posCluster
+    )
+  ) +
+    ggplot2::labs(
+      title="Estimated as positive",
+      x="Estimate for mu",
+      y=ggplot2::element_blank()) +
+    ggplot2::coord_cartesian(
+      ylim=ylim,
+      xlim=xlim) +
+    ggplot2::scale_x_continuous(expand=c(0, 0)) +
+    ggplot2::scale_y_continuous(expand=c(0, 0)) +
+    ggplot2::geom_point(size=2) +
+    ggplot2::scale_color_manual(
+      values=c(
+        "1" = colorPalette[["red"]],
+        "2" = colorPalette[["blue"]]),
+      drop=FALSE)
+
+  gridExtra::grid.arrange(
+    plot1, plot2,
+    layout_matrix=cbind(c(1), c(2)),
+    top="K-means clustering of population estimates for mu and sigma"
+  )
+}
+
+cd24midSwarmModel <- clusterModel(
+  model=cd24midSwarmModel,
+  centers=matrix(c(estimate$mu, estimate$sigma), ncol=2)
+)
+
+plotModelClusters(
+  model=cd24midSwarmModel,
+  ylim=c(0, 150),
+  xlim=c(0, 1023)
+)
+
+# Get an idea of the distribution of the calculated averages
+# Good results would be unimodal for each single parameter
+
+# Bimodal: looks like ~375 would be a better starting parameter for negative pop
+# Bimodal: based on values of mu, ~30 would be a good estimator of the negative
+#          pop stddev
+# Unimodal: looks like 650 is a good starting parameter for positive pop
+# Unimodal: looks like 120 is a good starting parameter for positive pop stddev
+
+```
+
+
+\newpage
+
+#### Parameter optimization
+
+\linebreak
+
+Now that we've generated a mixed model for every sample, we can compute best-fit parameters for the whole experiment globally.
+
+```{r bestFitParameters, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE}
+
+estimateGlobalParameters <- function(model) {
+  # Calculate means weighted in favour of multimodality:
+  #   result hovers around 373
+  # Calculate stddev weighted in favour of multimodality:
+  #   result hovers around 36
+  negStats <- model %>%
+    dplyr::filter(negCluster == 1, posCluster == 2) %>%
+      dplyr::summarise(
+        mu    = stats::weighted.mean(muNeg,    w=1-hartigans),
+        sigma = stats::weighted.mean(sigmaNeg, w=1-hartigans)
+      )
+
+  posStats <- model %>%
+    dplyr::filter(negCluster == 1, posCluster == 2) %>%
+      dplyr::summarise(
+        mu    = stats::weighted.mean(muPos,    w=1-hartigans),
+        sigma = stats::weighted.mean(sigmaPos, w=1-hartigans)
+      )
+
+  params <- rbind("neg" = negStats, "pos" = posStats)
+  params
+}
+
+estimatedParameters <- estimateGlobalParameters(model=cd24midSwarmModel)
+
+printDataFrame(
+  dataframe=estimatedParameters,
+  caption="Estimated parameters"
+)
+
+```
+
+
+```{r applyGlobalParameters, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE}
+
+applyGlobalParameters <- function(model, params) {
+  # Update our model with our best global parameter estimates
+  model$muNeg    <- params["neg", "mu"]
+  model$sigmaNeg <- params["neg", "sigma"]
+  model$muPos    <- params["pos", "mu"]
+  model$sigmaPos <- params["pos", "sigma"]
+  model
+}
+
+cd24midSwarmModel <- applyGlobalParameters(
+  model=cd24midSwarmModel,
+  params=estimatedParameters
+)
+
+printDataFrame(
+  dataframe=cd24midSwarmModel,
+  caption="Swarm deconvolution model: best-fit mu and sigma global parameters",
+  fontsize=5
+)
+
+```
+
+
+\newpage
+
+#### Resolving the distributions using an EM algorithm
+
+\linebreak
+
+Reference:
+* http://tinyheero.github.io/2016/01/03/gmm-em.html
+
+This first function is the expectation step of the EM algorithm:
+
+```{r EMalgorithmExpectation, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE}
+
+# Expectation Step of the EM Algorithm
+eStep <- function(x, muVector, sdVector, alphaVector) {
+  negDistributionProbabilities <-
+    stats::dnorm(x, mean=muVector[1], sd=sdVector[1]) * alphaVector[1]
+  posDistributionProbabilities <-
+    stats::dnorm(x, mean=muVector[2], sd=sdVector[2]) * alphaVector[2]
+
+  sumOfProbabilities <-
+    negDistributionProbabilities + posDistributionProbabilities
+
+  negPosteriorDistribution <-
+    negDistributionProbabilities / sumOfProbabilities
+  posPosteriorDistribution <-
+    posDistributionProbabilities / sumOfProbabilities
+
+  sumOfProbabilitiesLn <- log(sumOfProbabilities, base=exp(1))
+  logLikelihood <- sum(sumOfProbabilitiesLn)
+
+  list(
+    "logLikelihood" = logLikelihood,
+    "posteriorDf" = BiocGenerics::cbind(
+      negPosteriorDistribution,
+      posPosteriorDistribution
+    )
+  )
+}
+
+```
+
+And this is for the maximization step of the EM algorithm:
+
+```{r EMalgorithmMaximization, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE}
+# Maximization Step of the EM Algorithm
+mStep <- function(x, posteriorDf) {
+  negProportion <- sum(posteriorDf[, 1])
+  posProportion <- sum(posteriorDf[, 2])
+
+  negMu <- (1/negProportion) * sum(posteriorDf[, 1] * x)
+  posMu <- (1/posProportion) * sum(posteriorDf[, 2] * x)
+
+  negVar <- sum(posteriorDf[, 1] * (x - negMu)^2) * (1/negProportion)
+  posVar <- sum(posteriorDf[, 2] * (x - posMu)^2) * (1/posProportion)
+
+  negAlpha <- negProportion / length(x)
+  posAlpha <- posProportion / length(x)
+
+  list(
+    "mu"    = c(negMu, posMu),
+    "var"   = c(negVar, posVar),
+    "alpha" = c(negAlpha, posAlpha)
+  )
+}
+
+```
+
+
+\newpage
+
+And we can now iterate over both steps up to 50 times for each sample:
+
+```{r EMalgorithmExecution, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE}
+
+solveSwarmProportions <- function(gs, gate, axis, model) {
+  # Linter bindings
+  muNeg <-
+  muPos <-
+  sigmaNeg <-
+  sigmaPos <-
+  pNeg <-
+  pPos <-
+  nNeg <-
+  nPos <-
+  nTot <-
+  alpha <- NULL
+
+  populationsMu <- c(model$muNeg[1], model$muPos[1])
+  populationsSd <- c(model$sigmaNeg[1], model$sigmaPos[1])
+  populationsProportions <- c(model$pNeg[1], model$pPos[1])
+
+  numberOfSamples <- length(flowWorkspace::sampleNames(gs))
+
+  for (i in seq_len(numberOfSamples)) {
+    y <- flowWorkspace::gs_pop_get_data(gs, gate)
+    y <- flowWorkspace::cytoset_to_flowSet(y)
+    y <- y[[i]]@exprs[, axis]
+
+    eStepResultForAlpha <- function(alpha) {
+      eStep(
+        y,
+        muVector=populationsMu,
+        sdVector=populationsSd,
+        alphaVector=alpha
+      )
+    }
+
+    mStepResultForPosterior <- function(posterior) {
+      mStep(y, posteriorDf=posterior)
+    }
+
+    for (j in 1:50) {
+      if (j == 1) {
+        eStepResult <- eStepResultForAlpha(populationsProportions)
+        mStepResult <- mStepResultForPosterior(eStepResult[["posteriorDf"]])
+        currentLogLikelihood <- eStepResult[["logLikelihood"]]
+        logLikelihoodVector  <- eStepResult[["logLikelihood"]]
+      } else {
+        eStepResult <- eStepResultForAlpha(mStepResult[["alpha"]])
+        mStepResult <- mStepResultForPosterior(eStepResult[["posteriorDf"]])
+        logLikelihoodVector <-
+          c(logLikelihoodVector, eStepResult[["logLikelihood"]])
+        logLikelihoodDiff <-
+          abs((currentLogLikelihood - eStepResult[["logLikelihood"]]))
+
+        if (logLikelihoodDiff < 1e-6) {
+          break
+        } else {
+          currentLogLikelihood <- eStepResult[["logLikelihood"]]
+        }
+      }
+
+      model$pNeg[i] <- mStepResult$alpha[1]
+      model$pPos[i] <- mStepResult$alpha[2]
+    }
+  }
+
+  model$nTot <- model$nNeg + model$nPos
+  model$nNeg <- round(model$nTot * model$pNeg, digits=0)
+  model$nPos <- round(model$nTot * model$pPos, digits=0)
+  model
+}
+
+cd24midSwarmModel <- solveSwarmProportions(
+  gs=gatingset,
+  gate="cd24mid",
+  axis="SS.Log",
+  model=cd24midSwarmModel
+)
+
+```
+
+Let's check out how our model data looks so far.
+
+```{r deconvolutionStep5, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=7, fig.height=5}
+
+printDataFrame(
+  dataframe=cd24midSwarmModel,
+  caption="Swarm deconvolution final model for [CD24mid]",
+  fontsize=5
+)
+
+```
+
+
+\newpage
+
+#### Plotting the solutions
+
+\linebreak
+
+Now that we have obtained the optimal solution for our data set, we can create model distributions for use in plotting:
+
+```{r modelDistributionsPlot2, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=12, fig.height=12}
+
+genDistributionsForPlotting <- function(model) {
+  numberOfFlowframes <- length(row.names(model))
+  mixedModelDistributions <- list()
+
+  for (i in seq_len(numberOfFlowframes)) {
+    x <- seq(0, 1023)
+
+    negDistribution <-
+      stats::dnorm(x, mean=model$muNeg[i], sd=model$sigmaNeg[i]) * model$pNeg[i]
+
+    posDistribution <-
+      stats::dnorm(x, mean=model$muPos[i], sd=model$sigmaPos[i]) * model$pPos[i]
+
+    facetRow <- paste0("r", ((i-1) %/% 6)+1)
+    facetCol <- paste0("c", ((i-1) %% 6)+1)
+
+    tempData <- data.frame(
+      "distributionXAxis" = x,
+      "distributionYAxis" = c(negDistribution, posDistribution),
+      "population"        = rep(c("neg", "pos"), each=1024),
+      "facetRow"          = rep(facetRow, times=2048),
+      "facetCol"          = rep(facetCol, times=2048)
+    )
+
+    mixedModelDistributions <-
+      BiocGenerics::rbind(mixedModelDistributions, tempData)
+  }
+
+  mixedModelDistributions
+}
+
+plotDeconvolutedExperiment <- function(gs, model, gate, axis) {
+  mixedModelDistributions <- genDistributionsForPlotting(model)
+
+  ggplot2::ggplot(
+    data=flowWorkspace::gs_pop_get_data(gs, gate),
+    mapping=ggplot2::aes_string(x=axis)
+  ) +
+    ggplot2::scale_x_continuous(
+      limits=c(0, 1024),
+      expand=c(0, 0)) +
+    ggplot2::geom_histogram(
+      mapping=ggplot2::aes_string(
+        x=axis,
+        y="..density.."),
+      binwidth=40,
+      colour="#AAAAAA",
+      fill="#E6E6E6",
+      size=0.1) +
+    ggplot2::geom_line(
+      data=mixedModelDistributions,
+      mapping=ggplot2::aes(
+        x=distributionXAxis,
+        y=distributionYAxis,
+        colour=population)) +
+    ggplot2::labs(
+      title="Swarm deconvolution with a mixed gaussian model",
+      subtitle=paste0("Gated: [", gate, "]"),
+      x=axis,
+      y="Probability Density") +
+    ggplot2::theme(
+      panel.grid.major=ggplot2::element_blank(),
+      panel.grid.minor=ggplot2::element_blank(),
+      panel.background=ggplot2::element_rect(fill="#FAFAFA"),
+      axis.text.x=ggplot2::element_blank(),
+      axis.text.y=ggplot2::element_blank(),
+      axis.ticks.x=ggplot2::element_blank(),
+      axis.ticks.y=ggplot2::element_blank()) +
+    ggplot2::geom_label(
+      data=model,
+      x=180,
+      y=0.00345,
+      mapping=ggplot2::aes(label=paste0(round(pNeg*100, 1), "%")),
+      fill="#E87D72",
+      color="#FFFFFF",
+      fontface="bold",
+      size=4) +
+    ggplot2::geom_label(
+      data=model,
+      x=840,
+      y=0.00345,
+      mapping=ggplot2::aes(label=paste0(round(pPos*100, 1), "%")),
+      fill="#54BCC2",
+      color="#FFFFFF",
+      fontface="bold",
+      size=4) +
+    ggplot2::facet_grid(
+      rows=dplyr::vars(facetRow),
+      cols=dplyr::vars(facetCol),
+      labeller=ggplot2::as_labeller(facetLabels))
+}
+
+plotDeconvolutedExperiment(
+  gs=gatingset,
+  model=cd24midSwarmModel,
+  gate="cd24mid",
+  axis="SS.Log"
+)
+
+```
+
+
+\newpage
+
+### Putting it all together: CD24hi swarm deconvolution
+
+```{r swarmDeconvolutionCD24hi, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=10, fig.height=4}
+
+estimate <- list(
+  "mu"    = c(373, 650),
+  "sigma" = c(80, 80)
+)
+
+cd24hiSwarmModel <- generateSwarmModel(
+  gs=gatingset,
+  axis="SS.Log",
+  gate="cd24hi",
+  mu=estimate[["mu"]],
+  sigma=estimate[["sigma"]],
+  maxIterations=10000
+)
+
+cd24hiSwarmModel <- clusterModel(
+  model=cd24hiSwarmModel,
+  centers=matrix(c(estimate[["mu"]], estimate[["sigma"]]), ncol=2)
+)
+
+plotModelClusters(
+  model=cd24hiSwarmModel,
+  ylim=c(0, 150),
+  xlim=c(0, 1023)
+)
+
+cd24hiSwarmModel <- applyGlobalParameters(
+  model=cd24hiSwarmModel,
+  params=estimateGlobalParameters(cd24hiSwarmModel)
+)
+
+cd24hiSwarmModel <- solveSwarmProportions(
+  gs=gatingset,
+  gate="cd24hi",
+  axis="SS.Log",
+  model=cd24hiSwarmModel
+)
+
+printDataFrame(
+  dataframe=cd24hiSwarmModel,
+  caption="Swarm deconvolution final model for [CD24hi]",
+  fontsize=5
+)
+
+```
+
+
+```{r swarmDeconvolutionCD24hi2, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=12, fig.height=12}
+
+plotDeconvolutedExperiment(
+  gs=gatingset,
+  model=cd24hiSwarmModel,
+  gate="cd24hi",
+  axis="SS.Log"
+)
+
+```
+
+
+```{r combinedSwarmEffectGraph2, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=12, fig.height=4}
+
+distForAggregatePlotting <- function(model) {
+  numberOfFlowframes <- length(row.names(model))
+  mixedModelDistributions <- list()
+
+  for (i in seq_len(numberOfFlowframes)) {
+    x <- seq(0, 1023)
+
+    negDistribution <- stats::dnorm(
+      x,
+      mean=model$muNeg[i],
+      sd=model$sigmaNeg[i]
+    ) * model$pNeg[i]
+
+    posDistribution <- stats::dnorm(
+      x,
+      mean=model$muPos[i],
+      sd=model$sigmaPos[i]
+    ) * model$pPos[i]
+
+    cellLine <- model$cellLine[i]
+    dilution <- model$dilution[i]
+
+    tempData <- data.frame(
+      "distributionXAxis" = x,
+      "distributionYAxis" = c(negDistribution, posDistribution),
+      "population"        = rep(c("neg", "pos"), each=1024),
+      "cellLine"          = rep(cellLine, times=2048),
+      "dilution"          = rep(dilution, times=2048)
+    )
+
+    mixedModelDistributions <-
+      BiocGenerics::rbind(mixedModelDistributions, tempData)
+  }
+
+  mixedModelDistributions
+}
+
+plotDeconvAggregateExperiment <- function(gs, model, gate, axis) {
+  # Linter bindings
+  cellLine <-
+  dilution <- NULL
+
+  mapFacetRowToCellLine <- wrapr::qc(
+    "r1" = "786-O",
+    "r2" = "786-O",
+    "r3" = "786-O",
+    "r4" = "VHL",
+    "r5" = "VHL",
+    "r6" = "VHL"
+  )
+
+  mapFacetColToDilution <- wrapr::qc(
+    "c1" = "20",
+    "c2" = "60",
+    "c3" = "100",
+    "c4" = "140",
+    "c5" = "180",
+    "c6" = "220"
+  )
+
+  model <- model %>%
+    dplyr::mutate(., cellLine=mapFacetRowToCellLine[facetRow])
+
+  model <- model %>%
+    dplyr::mutate(., dilution=mapFacetColToDilution[facetCol])
+
+  model <- model %>%
+    group_by(cellLine, dilution) %>%
+      summarize(
+        muNeg    = mean(muNeg),
+        sigmaNeg = mean(sigmaNeg),
+        muPos    = mean(muPos),
+        sigmaPos = mean(sigmaPos),
+        pNeg     = sum(nNeg) / sum(nTot),
+        pPos     = sum(nPos) / sum(nTot),
+        nNeg     = sum(nNeg),
+        nPos     = sum(nPos),
+        nTot     = sum(nTot)
+      )
+
+  mixedModelDistributions <- distForAggregatePlotting(model)
+
+  cellLineOrdering <- c("786-O", "VHL")
+  dilutionOrdering <- c("20", "60", "100", "140", "180", "220")
+
+  model$cellLine <- factor(model$cellLine, levels=cellLineOrdering)
+  model$dilution <- factor(model$dilution, levels=dilutionOrdering)
+
+  mixedModelDistributions$cellLine <- factor(
+    mixedModelDistributions$cellLine,
+    levels=cellLineOrdering
+  )
+
+  mixedModelDistributions$dilution <- factor(
+    mixedModelDistributions$dilution,
+    levels=c(dilutionOrdering)
+  )
+
+  data <- flowWorkspace::gs_pop_get_data(gs, gate)
+  data <- flowWorkspace::cytoset_to_flowSet(data)
+
+  data@phenoData@data$dilution <- factor(
+    data@phenoData@data$dilution,
+    levels=dilutionOrdering
+  )
+
+  data@phenoData@data$cellLine <- factor(
+    data@phenoData@data$cellLine,
+    levels=cellLineOrdering
+  )
+
+  ggplot2::ggplot(
+    data=data,
+    mapping=aes_string(x=axis)
+  ) +
+    ggplot2::scale_x_continuous(
+      limits=c(0, 1024),
+      expand=c(0, 0)) +
+    ggplot2::geom_histogram(
+      mapping=ggplot2::aes_string(
+        x=axis,
+        y="..density.."),
+      binwidth=40,
+      colour="#AAAAAA",
+      fill="#E6E6E6",
+      size=0.1) +
+    ggplot2::geom_line(
+      data=mixedModelDistributions,
+      mapping=ggplot2::aes(
+        x=distributionXAxis,
+        y=distributionYAxis,
+        colour=population)) +
+    ggplot2::labs(
+      title="Swarm deconvolution with a mixed gaussian model",
+      subtitle=paste0("Gated: [", gate, "]"),
+      x=axis,
+      y="Probability Density") +
+    ggplot2::theme(
+      panel.grid.major=ggplot2::element_blank(),
+      panel.grid.minor=ggplot2::element_blank(),
+      panel.background=ggplot2::element_rect(fill="#FAFAFA"),
+      axis.text.x=ggplot2::element_blank(),
+      axis.text.y=ggplot2::element_blank(),
+      axis.ticks.x=ggplot2::element_blank(),
+      axis.ticks.y=ggplot2::element_blank()) +
+    ggplot2::geom_label(
+      data=model,
+      x=180,
+      y=0.00345,
+      mapping=ggplot2::aes(label=paste0(round(pNeg*100, 1), "%")),
+      fill="#E87D72",
+      color="#FFFFFF",
+      fontface="bold",
+      size=4) +
+    ggplot2::geom_label(
+      data=model,
+      x=840,
+      y=0.00345,
+      mapping=ggplot2::aes(label=paste0(round(pPos*100, 1), "%")),
+      fill="#54BCC2",
+      color="#FFFFFF",
+      fontface="bold",
+      size=4) +
+    ggplot2::facet_grid(
+      rows=dplyr::vars(cellLine),
+      cols=dplyr::vars(dilution),
+      labeller=ggplot2::as_labeller(facetLabels))
+}
+
+plotDeconvAggregateExperiment(
+  gs=gatingset,
+  model=cd24midSwarmModel,
+  gate="cd24mid",
+  axis="SS.Log"
+)
+
+plotDeconvAggregateExperiment(
+  gs=gatingset,
+  model=cd24hiSwarmModel,
+  gate="cd24hi",
+  axis="SS.Log"
+)
+
+```
+
+\newpage
+
+## Small particle quantification
+
+### Building our datasets
+
+```{r summarizing1, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
+
+# Create a dataframe to hold all the experimental data obtained
+experiment <- pData
+
+# Get a list of all relevant populations
+populations <- flowWorkspace::gs_get_pop_paths(gatingset, path="auto")
+populations <- populations[!(
+  populations %in% c("root", "boundary", "nonNoise")
+)]
+
+populations
+
+```
+
+
+
+```{r summarizing2, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
+
+# Get a list of all samples
+samples <- row.names(experiment)
+
+# Get all population statistics
+populationStatistics <- flowWorkspace::gs_pop_get_count_fast(gatingset)
+
+# Change to camelCase
+populationStatistics <- populationStatistics %>%
+  dplyr::rename(
+    "population"="Population",
+    "parent"="Parent",
+    "count"="Count",
+    "parentCount"="ParentCount"
+  )
+
+# Populate the experimental data with all the relevant gate population counts,
+# in "tidy" format
+#
+# References:
+# https://www.jstatsoft.org/article/view/v059i10
+
+for (sample in samples) {
+  # https://github.com/RGLab/flowWorkspace/issues/341#issuecomment-691742173
+  escapedSampleName <- gsub("[/:\\\\]", "_", sample)
+  sampleStatistic <- populationStatistics %>%
+    dplyr::filter(populationStatistics$name == escapedSampleName)
+
+  sampleStatistic$population <- sampleStatistic$population %>%
+    purrr::map(function(x) {
+      tail(strsplit(x, "/")[[1]], n=1)
+    })
+
+  for (population in populations) {
+    samplePopulationStatistic <- sampleStatistic %>%
+      dplyr::filter(sampleStatistic$population == population)
+
+    experiment[sample, population] <- samplePopulationStatistic$count
+  }
+}
+
+orderOfCellLines <- c("786-O", "VHL")
+
+experiment$temps    <- as.factor(experiment$temps)
+experiment$a23187   <- as.factor(experiment$a23187)
+experiment$n        <- as.factor(experiment$n)
+experiment$cellLine <- factor(experiment$cellLine, levels=orderOfCellLines)
+
+# Integrate swarm deconvolution data. The true-positive statistic for the CD24+
+# population can be derived from cd24mid and cd24hi
+experiment$cd24midTp <- cd24midSwarmModel$pPos
+experiment$cd24hiTp  <- cd24hiSwarmModel$pPos
+experiment$cd24posTp <- (
+  (experiment$cd24mid * experiment$cd24midTp) +
+  (experiment$cd24hi * experiment$cd24hiTp)) / experiment$cd24pos
+
+# Let's not go too crazy with significant digits
+experiment$cd24midTp <- round(experiment$cd24midTp, 3)
+experiment$cd24hiTp  <- round(experiment$cd24hiTp, 3)
+experiment$cd24posTp <- round(experiment$cd24posTp, 3)
+
+```
+
+\newpage
+
+```{r summarizing3, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
+
+interestingColumns <- c(
+  "beads",
+  "events",
+  "cd24pos",
+  "cd24neg",
+  "cd24mid",
+  "cd24hi",
+  "cd24posTp",
+  "cd24midTp",
+  "cd24hiTp"
+)
+
+printDataFrame(
+  dataframe=experiment[, interestingColumns],
+  caption="Gated event counts",
+  fontsize=5
+)
+
+```
+
+
+\newpage
+
+```{r reporting1, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
+
+# Constants for bead quantification procedure
+normalizedToXBeads <- 5000
+
+normalizedExperiment <- experiment
+
+normalizedExperiment$events <-
+  (experiment$events / experiment$beads) *
+    normalizedToXBeads * experiment$dilution * 10
+
+normalizedExperiment$cd24pos <-
+  (experiment$cd24pos / experiment$beads) *
+    normalizedToXBeads * experiment$dilution * 10
+
+normalizedExperiment$cd24neg <-
+  (experiment$cd24neg / experiment$beads) *
+    normalizedToXBeads * experiment$dilution * 10
+
+normalizedExperiment$cd24mid <-
+  (experiment$cd24mid / experiment$beads) *
+    normalizedToXBeads * experiment$dilution * 10
+
+normalizedExperiment$cd24hi <-
+  (experiment$cd24hi / experiment$beads) *
+    normalizedToXBeads * experiment$dilution * 10
+
+# To be or not to be, that is the question.
+normalizedExperiment$events  <- round(normalizedExperiment$events,  digits=0)
+normalizedExperiment$cd24pos <- round(normalizedExperiment$cd24pos, digits=0)
+normalizedExperiment$cd24neg <- round(normalizedExperiment$cd24neg, digits=0)
+normalizedExperiment$cd24mid <- round(normalizedExperiment$cd24mid, digits=0)
+normalizedExperiment$cd24hi  <- round(normalizedExperiment$cd24hi,  digits=0)
+
+# For normalized data, bead counts lose their significance...
+# but we may be interested in the events' corresponding concentration
+# in undiluted conditioned-medium (CM)
+normalizedExperiment$beads    <- NULL
+normalizedExperiment$cmVolume <- 40 # TEMPORARY, FIX THIS
+
+```
+
+
+\newpage
+
+```{r reporting2, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
+
+interestingColumns <- c(
+  "cmVolume",
+  "events",
+  "cd24pos",
+  "cd24neg",
+  "cd24mid",
+  "cd24hi",
+  "cd24posTp",
+  "cd24midTp",
+  "cd24hiTp"
+)
+
+printDataFrame(
+  dataframe=normalizedExperiment[, interestingColumns],
+  caption="Gated event counts",
+  fontsize=5
+)
+
+```
+
+
+\newpage
+
+#### Dataset 1 - Raw gate counts
+
+\linebreak
+
+```{r dataset1, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
+
+dataset1 <- normalizedExperiment
+
+dataset1$cd24posTp <- NULL
+dataset1$cd24midTp <- NULL
+dataset1$cd24hiTp <- NULL
+
+dataset1$cd24posProp <- dataset1$cd24pos / dataset1$events
+dataset1$cd24midProp <- dataset1$cd24mid / dataset1$events
+dataset1$cd24hiProp <- dataset1$cd24hi / dataset1$events
+
+interestingColumns <- c(
+  "cmVolume",
+  "events",
+  "cd24pos",
+  "cd24neg",
+  "cd24mid",
+  "cd24hi",
+  "cd24posProp",
+  "cd24midProp",
+  "cd24hiProp"
+)
+
+printDataFrame(
+  dataframe=dataset1[, interestingColumns],
+  caption="Raw gate event counts, exhibiting swarm effect",
+  fontsize=5
+)
+
+```
+
+
+\newpage
+
+#### Dataset 2 - Swarm-deconvoluted
+
+\linebreak
+
+```{r dataset2, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
+
+dataset2 <- normalizedExperiment
+
+dataset2$cd24mid <- dataset2$cd24mid * dataset2$cd24midTp
+dataset2$cd24hi  <- dataset2$cd24hi  * dataset2$cd24hiTp
+dataset2$cd24pos <- dataset2$cd24mid + dataset2$cd24hi
+
+dataset2$cd24posProp <- dataset2$cd24pos / dataset2$events
+dataset2$cd24midProp <- dataset2$cd24mid / dataset2$events
+dataset2$cd24hiProp  <- dataset2$cd24hi  / dataset2$events
+
+dataset2$cd24posTp <- NULL
+dataset2$cd24midTp <- NULL
+dataset2$cd24hiTp  <- NULL
+
+printDataFrame(
+  dataframe=dataset2[, interestingColumns],
+  caption="Swarm-deconvoluted event counts",
+  fontsize=5
+)
+
+```
+
+
+
+\newpage
+
+#### Dataset 3 - Swarm-deconvoluted and normalized
+
+\linebreak
+
+```{r computingNoise, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=12, fig.height=8}
+
+# This optimization function will figure out how much noise is in the population
+# (ie.: for blank subtraction)
+subtractNoise <- function(noiseCeiling, events, tpRate, beads, dilution) {
+  normalizedToXBeads <- 5000
+  multiplier <- (normalizedToXBeads * dilution * 10) / beads
+  BiocGenerics::var(((events * tpRate) - noiseCeiling) * multiplier)
+}
+
+cd24hiNoiseCeiling <- optimize(
+  f=subtractNoise,
+  interval=c(1, 5000),
+  events=experiment$cd24hi,
+  tpRate=experiment$cd24hiTp,
+  beads=experiment$beads,
+  dilution=experiment$dilution
+)$minimum
+
+cd24midNoiseCeiling <- optimize(
+  f=subtractNoise,
+  interval=c(100, 10000),
+  events=experiment$cd24mid,
+  tpRate=experiment$cd24midTp,
+  beads=experiment$beads,
+  dilution=experiment$dilution
+)$minimum
+
+cd24negNoiseCeiling <- optimize(
+  f=subtractNoise,
+  interval=c(100, 9000),
+  events=experiment$cd24neg,
+  tpRate=1,
+  beads=experiment$beads,
+  dilution=experiment$dilution
+)$minimum
+
+# Make sure the noiseCeiling is not set above the measured signal
+if (any(experiment$cd24hi < cd24hiNoiseCeiling)) {
+  cd24hiNoiseCeiling <- min(experiment$cd24hi)
+}
+if (any(experiment$cd24mid < cd24midNoiseCeiling)) {
+  cd24midNoiseCeiling <- min(experiment$cd24mid)
+}
+if (any(experiment$cd24neg < cd24negNoiseCeiling)) {
+  cd24negNoiseCeiling <- min(experiment$cd24neg)
+}
+
+list(
+  "cd24hiNoiseCeiling: "  = cd24hiNoiseCeiling,
+  "cd24midNoiseCeiling: " = cd24midNoiseCeiling,
+  "cd24negNoiseCeiling: " = cd24negNoiseCeiling
+)
+
+```
+
+
+\newpage
+
+```{r denoisedNormalizedData, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=12, fig.height=8}
+
+# Let's make a separate dataframe for these data
+dataset3 <- experiment
+
+# Normalize with noise reduction
+factor <- (experiment$dilution * normalizedToXBeads * 10) / experiment$beads
+
+dataset3$cd24mid <- (
+  (experiment$cd24mid * experiment$cd24midTp) - cd24midNoiseCeiling) * factor
+
+dataset3$cd24hi <- (
+  (experiment$cd24hi * experiment$cd24hiTp) - cd24hiNoiseCeiling) * factor
+
+dataset3$cd24neg <- (experiment$cd24neg - cd24negNoiseCeiling) * factor
+
+# Replace negative values by zero
+dataset3$cd24neg[dataset3$cd24neg < 0] <- 0
+dataset3$cd24mid[dataset3$cd24mid < 0] <- 0
+dataset3$cd24hi[dataset3$cd24hi < 0]   <- 0
+
+# To be or not to be, that is the question
+dataset3$cd24neg <- round(dataset3$cd24neg, digits=0)
+dataset3$cd24mid <- round(dataset3$cd24mid, digits=0)
+dataset3$cd24hi  <- round(dataset3$cd24hi, digits=0)
+
+# Compute remaining columns
+dataset3$cd24pos <- dataset3$cd24mid + dataset3$cd24hi
+dataset3$events  <- dataset3$cd24neg + dataset3$cd24pos
+
+dataset3$cd24posProp <- dataset3$cd24pos / dataset3$events
+dataset3$cd24midProp <- dataset3$cd24mid / dataset3$events
+dataset3$cd24hiProp  <- dataset3$cd24hi  / dataset3$events
+
+# We don't need these columns any longer
+dataset3$beads     <- NULL
+dataset3$cd24posTp <- NULL
+dataset3$cd24midTp <- NULL
+dataset3$cd24hiTp  <- NULL
+dataset3$cmVolume  <- 40
+
+printDataFrame(
+  dataframe=dataset3[, interestingColumns],
+  caption="Swarm-deconvoluted and denoised event counts",
+  fontsize=5
+)
+
+```
+
+\newpage
+
+### Computing summary data
+
+#### Dataset 1 - Raw gate counts
+
+\linebreak
+
+```{r reporting6, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
+
+# Compute summary statistics for each biological triplicate
+dataset1Summary <- dataset1 %>%
+  dplyr::group_by(cellLine, dilution) %>%
+    dplyr::summarise(
+      n          = dplyr::n(),
+      eventsAvg  = BiocGenerics::mean(events),
+      eventsSem  = BiocGenerics::sd(events) / dplyr::n(),
+      cd24posAvg = BiocGenerics::mean(cd24pos),
+      cd24posSem = BiocGenerics::sd(cd24pos) / dplyr::n(),
+      cd24negAvg = BiocGenerics::mean(cd24neg),
+      cd24negSem = BiocGenerics::sd(cd24neg) / dplyr::n(),
+      cd24hiAvg  = BiocGenerics::mean(cd24hi),
+      cd24hiSem  = BiocGenerics::sd(cd24hi) / dplyr::n(),
+      cd24midAvg = BiocGenerics::mean(cd24mid),
+      cd24midSem = BiocGenerics::sd(cd24mid) / dplyr::n(),
+      cd24posPropAvg = BiocGenerics::mean(cd24pos/events),
+      cd24posPropSem = BiocGenerics::sd(cd24pos/events) / dplyr::n(),
+      cd24negPropAvg = BiocGenerics::mean(cd24neg/events),
+      cd24negPropSem = BiocGenerics::sd(cd24neg/events) / dplyr::n(),
+      cd24midPropAvg = BiocGenerics::mean(cd24mid/events),
+      cd24midPropSem = BiocGenerics::sd(cd24mid/events) / dplyr::n(),
+      cd24hiPropAvg  = BiocGenerics::mean(cd24hi/events),
+      cd24hiPropSem  = BiocGenerics::sd(cd24hi/events) / dplyr::n()
+    )
+
+```
+
+\newpage
+
+```{r reporting8, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
+
+interestingColumns <- function(metric) {
+  c(
+    "cellLine",
+    "dilution",
+    "n",
+    paste0("events", metric),
+    paste0("cd24pos", metric),
+    paste0("cd24neg", metric),
+    paste0("cd24mid", metric),
+    paste0("cd24hi", metric),
+    paste0("cd24posProp", metric),
+    paste0("cd24negProp", metric),
+    paste0("cd24midProp", metric),
+    paste0("cd24hiProp", metric)
+  )
+}
+
+printDataFrame(
+  dataframe=dataset1Summary[, interestingColumns("Avg")],
+  caption="Normalized experiment summary: calculated means",
+  fontsize=5
+)
+
+printDataFrame(
+  dataframe=dataset1Summary[, interestingColumns("Sem")],
+  caption="Normalized experiment summary: calculated SEMs",
+  fontsize=5
+)
+
+```
+
+
+\newpage
+
+#### Dataset 2 - Swarm-deconvoluted
+
+\linebreak
+
+```{r reporting7, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
+
+# Do the same with swarm-deconvoluted data
+dataset2Summary <- dataset2 %>%
+  dplyr::group_by(cellLine, dilution) %>%
+    dplyr::summarise(
+      n          = dplyr::n(),
+      eventsAvg  = BiocGenerics::mean(events),
+      eventsSem  = BiocGenerics::sd(events) / dplyr::n(),
+      cd24posAvg = BiocGenerics::mean(cd24pos),
+      cd24posSem = BiocGenerics::sd(cd24pos) / dplyr::n(),
+      cd24negAvg = BiocGenerics::mean(cd24neg),
+      cd24negSem = BiocGenerics::sd(cd24neg) / dplyr::n(),
+      cd24hiAvg  = BiocGenerics::mean(cd24hi),
+      cd24hiSem  = BiocGenerics::sd(cd24hi) / dplyr::n(),
+      cd24midAvg = BiocGenerics::mean(cd24mid),
+      cd24midSem = BiocGenerics::sd(cd24mid) / dplyr::n(),
+      cd24posPropAvg = BiocGenerics::mean(cd24pos/events),
+      cd24posPropSem = BiocGenerics::sd(cd24pos/events) / dplyr::n(),
+      cd24negPropAvg = BiocGenerics::mean(cd24neg/events),
+      cd24negPropSem = BiocGenerics::sd(cd24neg/events) / dplyr::n(),
+      cd24midPropAvg = BiocGenerics::mean(cd24mid/events),
+      cd24midPropSem = BiocGenerics::sd(cd24mid/events) / dplyr::n(),
+      cd24hiPropAvg  = BiocGenerics::mean(cd24hi/events),
+      cd24hiPropSem  = BiocGenerics::sd(cd24hi/events) / dplyr::n()
+    )
+
+```
+
+
+\newpage
+
+```{r reporting9, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
+
+printDataFrame(
+  dataframe=dataset2Summary[, interestingColumns("Avg")],
+  caption="Normalized experiment summary (deconvoluted): calculated means",
+  fontsize=5
+)
+
+printDataFrame(
+  dataframe=dataset2Summary[, interestingColumns("Sem")],
+  caption="Normalized experiment summary (deconvoluted): calculated SEMs",
+  fontsize=5
+)
+
+```
+
+
+\newpage
+
+#### Dataset 3 - Swarm-deconvoluted and normalized
+
+\linebreak
+
+```{r reporting27, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
+
+# Compute summary statistics for each biological triplicate
+dataset3Summary <- dataset3 %>%
+  dplyr::group_by(cellLine, dilution) %>%
+    dplyr::summarise(
+      n          = dplyr::n(),
+      eventsAvg  = BiocGenerics::mean(events),
+      eventsSem  = BiocGenerics::sd(events) / dplyr::n(),
+      cd24posAvg = BiocGenerics::mean(cd24pos),
+      cd24posSem = BiocGenerics::sd(cd24pos) / dplyr::n(),
+      cd24negAvg = BiocGenerics::mean(cd24neg),
+      cd24negSem = BiocGenerics::sd(cd24neg) / dplyr::n(),
+      cd24hiAvg  = BiocGenerics::mean(cd24hi),
+      cd24hiSem  = BiocGenerics::sd(cd24hi) / dplyr::n(),
+      cd24midAvg = BiocGenerics::mean(cd24mid),
+      cd24midSem = BiocGenerics::sd(cd24mid) / dplyr::n(),
+      cd24posPropAvg = BiocGenerics::mean(cd24pos/events),
+      cd24posPropSem = BiocGenerics::sd(cd24pos/events) / dplyr::n(),
+      cd24negPropAvg = BiocGenerics::mean(cd24neg/events),
+      cd24negPropSem = BiocGenerics::sd(cd24neg/events) / dplyr::n(),
+      cd24midPropAvg = BiocGenerics::mean(cd24mid/events),
+      cd24midPropSem = BiocGenerics::sd(cd24mid/events) / dplyr::n(),
+      cd24hiPropAvg  = BiocGenerics::mean(cd24hi/events),
+      cd24hiPropSem  = BiocGenerics::sd(cd24hi/events) / dplyr::n()
+    )
+
+```
+
+
+\newpage
+
+```{r reporting28, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
+
+printDataFrame(
+  dataframe=dataset3Summary[, interestingColumns("Avg")],
+  caption="Denoised and normalized experiment summary: calculated means",
+  fontsize=5
+)
+
+printDataFrame(
+  dataframe=dataset3Summary[, interestingColumns("Sem")],
+  caption="Denoised and normalized experiment summary: calculated SEMs",
+  fontsize=5
+)
+
+```
+
+
+\newpage
+
+### Building sample graphs
+
+#### Dataset 1 - Raw gate counts
+
+\linebreak
+
+```{r reporting3, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=12, fig.height=8}
+
+# Let's generate plots to show the swarm effect
+
+abcTemplate <- function(
+  data,
+  title,
+  subtitle,
+  measurement,
+  scaleYLimits,
+  scaleYLabels,
+  legendPosition
+) {
+  measurement <- rlang::sym(measurement)
+
+  ggplot2::ggplot(
+    data=data,
+    mapping=ggplot2::aes(
+      x=dilution,
+      y=!!measurement,
+      colour=cellLine,
+      group=interaction(cellLine, facetRow)
+    )
+  ) +
+    ggplot2::labs(
+      title=title,
+      subtitle=subtitle,
+      x=ggplot2::element_blank(),
+      y=ggplot2::element_blank()) +
+    ggplot2::geom_point() +
+    ggplot2::geom_line() +
+    ggplot2::scale_x_continuous(
+      limits=c(20, 220),
+      breaks=c(0, 20, 60, 100, 140, 180, 220),
+      minor_breaks=c(40, 80, 120, 160, 200)) +
+    ggplot2::scale_y_continuous(
+      limits=scaleYLimits,
+      labels=scaleYLabels) +
+    ggplot2::theme(
+      legend.position=legendPosition,
+      legend.justification=c(1, 1),
+      legend.title=ggplot2::element_blank())
+}
+
+plotA1 <- abcTemplate(
+  data=dataset1,
+  title="Proportion of CD24+ events",
+  subtitle="Swarm effect",
+  measurement="cd24posProp",
+  scaleYLimits=c(0, 1),
+  scaleYLabels=scales::number,
+  legendPosition="none"
+)
+
+plotA2 <- abcTemplate(
+  data=dataset1,
+  title="Proportion of CD24mid events",
+  subtitle="Swarm effect",
+  measurement="cd24midProp",
+  scaleYLimits=c(0, 1),
+  scaleYLabels=scales::number,
+  legendPosition="none"
+)
+
+plotA3 <- abcTemplate(
+  data=dataset1,
+  title="Proportion of CD24hi events",
+  subtitle="Swarm effect",
+  measurement="cd24hiProp",
+  scaleYLimits=c(0, 1),
+  scaleYLabels=scales::number,
+  legendPosition=c(1, 1)
+)
+
+plotA4 <- abcTemplate(
+  data=dataset1,
+  title="Absolute count of CD24+ events",
+  subtitle="Swarm effect",
+  measurement="cd24pos",
+  scaleYLimits=c(0, 1.2e7),
+  scaleYLabels=scales::scientific,
+  legendPosition="none"
+)
+
+plotA5 <- abcTemplate(
+  data=dataset1,
+  title="Absolute count of CD24mid events",
+  subtitle="Swarm effect",
+  measurement="cd24mid",
+  scaleYLimits=c(0, 1.2e7),
+  scaleYLabels=scales::scientific,
+  legendPosition="none"
+)
+
+plotA6 <- abcTemplate(
+  data=dataset1,
+  title="Absolute count of CD24hi events",
+  subtitle="Swarm effect",
+  measurement="cd24hi",
+  scaleYLimits=c(0, 1.2e6),
+  scaleYLabels=scales::scientific,
+  legendPosition=c(1, 1)
+)
+
+```
+
+
+#### Dataset 2 - Swarm-deconvoluted
+
+\linebreak
+
+```{r reporting4736, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=12, fig.height=8}
+
+# Let's generate plots for the swarm-deconvoluted data
+
+plotB1 <- abcTemplate(
+  data=dataset2,
+  title="",
+  subtitle="Swarm-deconvoluted",
+  measurement="cd24posProp",
+  scaleYLimits=c(0, 1),
+  scaleYLabels=scales::number,
+  legendPosition="none"
+)
+
+plotB2 <- abcTemplate(
+  data=dataset2,
+  title="",
+  subtitle="Swarm-deconvoluted",
+  measurement="cd24midProp",
+  scaleYLimits=c(0, 1),
+  scaleYLabels=scales::number,
+  legendPosition="none"
+)
+
+plotB3 <- abcTemplate(
+  data=dataset2,
+  title="",
+  subtitle="Swarm-deconvoluted",
+  measurement="cd24hiProp",
+  scaleYLimits=c(0, 1),
+  scaleYLabels=scales::number,
+  legendPosition="none"
+)
+
+plotB4 <- abcTemplate(
+  data=dataset2,
+  title="",
+  subtitle="Swarm-deconvoluted",
+  measurement="cd24pos",
+  scaleYLimits=c(0, 1.2e7),
+  scaleYLabels=scales::scientific,
+  legendPosition="none"
+)
+
+plotB5 <- abcTemplate(
+  data=dataset2,
+  title="",
+  subtitle="Swarm-deconvoluted",
+  measurement="cd24mid",
+  scaleYLimits=c(0, 1.2e7),
+  scaleYLabels=scales::scientific,
+  legendPosition="none"
+)
+
+plotB6 <- abcTemplate(
+  data=dataset2,
+  title="",
+  subtitle="Swarm-deconvoluted",
+  measurement="cd24hi",
+  scaleYLimits=c(0, 1.2e6),
+  scaleYLabels=scales::scientific,
+  legendPosition="none"
+)
+
+```
+
+
+#### Dataset 3 - Swarm-deconvoluted and normalized
+
+\linebreak
+
+```{r reporting34353, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=12, fig.height=8}
+# Let's generate plots to show the final result
+
+plotC1 <- abcTemplate(
+  data=dataset3,
+  title="",
+  subtitle="Swarm deconvoluted + Denoised",
+  measurement="cd24posProp",
+  scaleYLimits=c(0, 1),
+  scaleYLabels=scales::number,
+  legendPosition="none"
+)
+
+plotC2 <- abcTemplate(
+  data=dataset3,
+  title="",
+  subtitle="Swarm deconvoluted + Denoised",
+  measurement="cd24midProp",
+  scaleYLimits=c(0, 1),
+  scaleYLabels=scales::number,
+  legendPosition="none"
+)
+
+plotC3 <- abcTemplate(
+  data=dataset3,
+  title="",
+  subtitle="Swarm deconvoluted + Denoised",
+  measurement="cd24hiProp",
+  scaleYLimits=c(0, 1),
+  scaleYLabels=scales::number,
+  legendPosition="none"
+)
+
+plotC4 <- abcTemplate(
+  data=dataset3,
+  title="",
+  subtitle="Swarm deconvoluted + Denoised",
+  measurement="cd24pos",
+  scaleYLimits=c(0, 1.2e7),
+  scaleYLabels=scales::scientific,
+  legendPosition="none"
+)
+
+plotC5 <- abcTemplate(
+  data=dataset3,
+  title="",
+  subtitle="Swarm deconvoluted + Denoised",
+  measurement="cd24mid",
+  scaleYLimits=c(0, 1.2e7),
+  scaleYLabels=scales::scientific,
+  legendPosition="none"
+)
+
+plotC6 <- abcTemplate(
+  data=dataset3,
+  title="",
+  subtitle="Swarm deconvoluted + Denoised",
+  measurement="cd24hi",
+  scaleYLimits=c(0, 1.2e6),
+  scaleYLabels=scales::scientific,
+  legendPosition="none"
+)
+
+```
+
+
+\newpage
+
+### Building Summary graphs
+
+#### Dataset 1 - Raw gate counts
+
+\linebreak
+
+```{r reporting10, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=12, fig.height=8}
+
+defTemplate <- function(
+  data,
+  title,
+  subtitle,
+  measurement,
+  sem,
+  scaleYLimits,
+  scaleYLabels,
+  legendPosition
+) {
+  measurement <- rlang::sym(measurement)
+  sem <- rlang::sym(sem)
+
+  ggplot2::ggplot(
+    data=data,
+    mapping=ggplot2::aes(
+      x=dilution,
+      y=!!measurement,
+      fill=cellLine
+    )
+  ) +
+    ggplot2::labs(
+      title=title,
+      subtitle=subtitle,
+      x=ggplot2::element_blank(),
+      y=ggplot2::element_blank()) +
+    ggplot2::theme(
+      panel.background=ggplot2::element_rect(fill="#F4F4F4"),
+      panel.grid.major.x=ggplot2::element_blank(),
+      panel.grid.minor.x=ggplot2::element_blank(),
+      panel.grid.minor.y=ggplot2::element_line(colour="#EEEEEE"),
+      axis.ticks=ggplot2::element_blank(),
+      axis.title.x=ggplot2::element_text(vjust=-2),
+      axis.title.y=ggplot2::element_text(
+        angle=90,
+        vjust=2),
+      legend.position=legendPosition,
+      legend.justification=c(1, 1),
+      legend.title=ggplot2::element_blank()) +
+    ggplot2::geom_bar(
+      position=ggplot2::position_dodge(),
+      stat="identity") +
+    ggplot2::geom_errorbar(
+      mapping=ggplot2::aes(
+        ymin=!!measurement - !!sem,
+        ymax=!!measurement + !!sem,
+        color=cellLine),
+      width=15,
+      size=1,
+      position=ggplot2::position_dodge(35),
+      show.legend=FALSE) +
+    ggplot2::scale_fill_manual(
+      name="Cell line",
+      values=c(
+        "#F3756E",
+        "#1DBDC3")) +
+    ggplot2::scale_color_manual(
+      values=c(
+        "#B8645B",
+        "#43989C")) +
+    ggplot2::scale_x_continuous(
+      limits=c(0, 240),
+      breaks=c(20, 60, 100, 140, 180, 220),
+      minor_breaks=c(40, 80, 120, 160, 200)) +
+    ggplot2::scale_y_continuous(
+      limits=scaleYLimits,
+      labels=scaleYLabels)
+}
+
+# Show the swarm effect
+
+plotD1 <- defTemplate(
+  data=dataset1Summary,
+  title="Proportion of CD24+ events",
+  subtitle="Swarm effect",
+  measurement="cd24posPropAvg",
+  sem="cd24posPropSem",
+  scaleYLimits=c(0, 1),
+  scaleYLabels=scales::number,
+  legendPosition="none"
+)
+
+plotD2 <- defTemplate(
+  data=dataset1Summary,
+  title="Proportion of CD24mid events",
+  subtitle="Swarm effect",
+  measurement="cd24midPropAvg",
+  sem="cd24midPropSem",
+  scaleYLimits=c(0, 1),
+  scaleYLabels=scales::number,
+  legendPosition="none"
+)
+
+plotD3 <- defTemplate(
+  data=dataset1Summary,
+  title="Proportion of CD24hi events",
+  subtitle="Swarm effect",
+  measurement="cd24hiPropAvg",
+  sem="cd24hiPropSem",
+  scaleYLimits=c(0, 1),
+  scaleYLabels=scales::number,
+  legendPosition=c(1, 1)
+)
+
+plotD4 <- defTemplate(
+  data=dataset1Summary,
+  title="Absolute CD24+ events count",
+  subtitle="Swarm effect",
+  measurement="cd24posAvg",
+  sem="cd24posSem",
+  scaleYLimits=c(0, 1.2e7),
+  scaleYLabels=scales::scientific,
+  legendPosition="none"
+)
+
+plotD5 <- defTemplate(
+  data=dataset1Summary,
+  title="Absolute CD24mid events count",
+  subtitle="Swarm effect",
+  measurement="cd24midAvg",
+  sem="cd24midSem",
+  scaleYLimits=c(0, 1.2e7),
+  scaleYLabels=scales::scientific,
+  legendPosition="none"
+)
+
+plotD6 <- defTemplate(
+  data=dataset1Summary,
+  title="Absolute CD24hi events count",
+  subtitle="Swarm effect",
+  measurement="cd24hiAvg",
+  sem="cd24hiSem",
+  scaleYLimits=c(0, 1.2e6),
+  scaleYLabels=scales::scientific,
+  legendPosition=c(1, 1)
+)
+
+```
+
+
+#### Dataset 2 - Swarm-deconvoluted
+
+\linebreak
+
+```{r reporting13, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=12, fig.height=8}
+
+# Swarm-deconvoluted data plots
+
+plotE1 <- defTemplate(
+  data=dataset2Summary,
+  title="",
+  subtitle="Swarm-deconvoluted",
+  measurement="cd24posPropAvg",
+  sem="cd24posPropSem",
+  scaleYLimits=c(0, 1),
+  scaleYLabels=scales::number,
+  legendPosition="none"
+)
+
+plotE2 <- defTemplate(
+  data=dataset2Summary,
+  title="",
+  subtitle="Swarm-deconvoluted",
+  measurement="cd24midPropAvg",
+  sem="cd24midPropSem",
+  scaleYLimits=c(0, 1),
+  scaleYLabels=scales::number,
+  legendPosition="none"
+)
+
+plotE3 <- defTemplate(
+  data=dataset2Summary,
+  title="",
+  subtitle="Swarm-deconvoluted",
+  measurement="cd24hiPropAvg",
+  sem="cd24hiPropSem",
+  scaleYLimits=c(0, 1),
+  scaleYLabels=scales::number,
+  legendPosition="none"
+)
+
+plotE4 <- defTemplate(
+  data=dataset2Summary,
+  title="",
+  subtitle="Swarm-deconvoluted",
+  measurement="cd24posAvg",
+  sem="cd24posSem",
+  scaleYLimits=c(0, 1.2e7),
+  scaleYLabels=scales::scientific,
+  legendPosition="none"
+)
+
+plotE5 <- defTemplate(
+  data=dataset2Summary,
+  title="",
+  subtitle="Swarm-deconvoluted",
+  measurement="cd24midAvg",
+  sem="cd24midSem",
+  scaleYLimits=c(0, 1.2e7),
+  scaleYLabels=scales::scientific,
+  legendPosition="none"
+)
+
+plotE6 <- defTemplate(
+  data=dataset2Summary,
+  title="",
+  subtitle="Swarm-deconvoluted",
+  measurement="cd24hiAvg",
+  sem="cd24hiSem",
+  scaleYLimits=c(0, 1.2e6),
+  scaleYLabels=scales::scientific,
+  legendPosition="none"
+)
+
+```
+
+
+#### Dataset 3 - Swarm-deconvoluted and normalized
+
+\linebreak
+
+```{r reporting29, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
+
+# Let's generate plots to show the final result
+
+plotF1 <- defTemplate(
+  data=dataset3Summary,
+  title="",
+  subtitle="Denoised and swarm-deconvoluted",
+  measurement="cd24posPropAvg",
+  sem="cd24posPropSem",
+  scaleYLimits=c(0, 1),
+  scaleYLabels=scales::number,
+  legendPosition="none"
+)
+
+plotF2 <- defTemplate(
+  data=dataset3Summary,
+  title="",
+  subtitle="Denoised and swarm-deconvoluted",
+  measurement="cd24midPropAvg",
+  sem="cd24midPropSem",
+  scaleYLimits=c(0, 1),
+  scaleYLabels=scales::number,
+  legendPosition="none"
+)
+
+plotF3 <- defTemplate(
+  data=dataset3Summary,
+  title="",
+  subtitle="Denoised and swarm-deconvoluted",
+  measurement="cd24hiPropAvg",
+  sem="cd24hiPropSem",
+  scaleYLimits=c(0, 1),
+  scaleYLabels=scales::number,
+  legendPosition="none"
+)
+
+plotF4 <- defTemplate(
+  data=dataset3Summary,
+  title="",
+  subtitle="Denoised and swarm-deconvoluted",
+  measurement="cd24posAvg",
+  sem="cd24posSem",
+  scaleYLimits=c(0, 1.2e7),
+  scaleYLabels=scales::scientific,
+  legendPosition="none"
+)
+
+plotF5 <- defTemplate(
+  data=dataset3Summary,
+  title="",
+  subtitle="Denoised and swarm-deconvoluted",
+  measurement="cd24midAvg",
+  sem="cd24midSem",
+  scaleYLimits=c(0, 1.2e7),
+  scaleYLabels=scales::scientific,
+  legendPosition="none"
+)
+
+plotF6 <- defTemplate(
+  data=dataset3Summary,
+  title="",
+  subtitle="Denoised and swarm-deconvoluted",
+  measurement="cd24hiAvg",
+  sem="cd24hiSem",
+  scaleYLimits=c(0, 1.2e6),
+  scaleYLabels=scales::scientific,
+  legendPosition="none"
+)
+
+```
+
+
+\newpage
+
+### Visualizing the process
+
+#### Sample graphs
+
+\linebreak
+
+```{r reporting25, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=12, fig.height=12}
+
+gridExtra::grid.arrange(
+  plotA1, plotA2, plotA3,
+  plotB1, plotB2, plotB3,
+  plotC1, plotC2, plotC3,
+  nrow=3,
+  top="Denoised and swarm-deconvoluted",
+  left="Proportion",
+  bottom="Dilution factor"
+)
+
+```
+
+
+\newpage
+
+```{r reporting26, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=12, fig.height=12}
+
+gridExtra::grid.arrange(
+  plotA4, plotA5, plotA6,
+  plotB4, plotB5, plotB6,
+  plotC4, plotC5, plotC6,
+  nrow=3,
+  top="Denoised and swarm-deconvoluted",
+  left="Absolute count",
+  bottom="Dilution factor"
+)
+
+```
+
+
+\newpage
+
+#### Summary graphs
+
+\linebreak
+
+```{r reporting35, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=12, fig.height=12}
+
+gridExtra::grid.arrange(
+  plotD1, plotD2, plotD3,
+  plotE1, plotE2, plotE3,
+  plotF1, plotF2, plotF3,
+  nrow=3,
+  top="Denoised and swarm-deconvoluted",
+  left="Proportion",
+  bottom="Dilution factor"
+)
+
+```
+
+
+\newpage
+
+```{r reporting36, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=12, fig.height=12}
+
+gridExtra::grid.arrange(
+  plotD4, plotD5, plotD6,
+  plotE4, plotE5, plotE6,
+  plotF4, plotF5, plotF6,
+  nrow=3,
+  top="Denoised and swarm-deconvoluted",
+  left="Absolute count",
+  bottom="Dilution factor"
+)
+
+```
+
+
+\newpage
+
+### Significance testing
+
+First we must verify that test assumptions are met.
+
+```{r significanceTestingAssumptionsNumeric, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=3}
+
+# Testing for univariate normality
+significanceDfShapiro <- c(
+  stats::shapiro.test(dataset3$cd24pos)$p.value,
+  stats::shapiro.test(dataset3$cd24mid)$p.value,
+  stats::shapiro.test(dataset3$cd24hi)$p.value,
+  stats::shapiro.test(dataset3$cd24posProp)$p.value,
+  stats::shapiro.test(dataset3$cd24midProp)$p.value,
+  stats::shapiro.test(dataset3$cd24hiProp)$p.value
+)
+
+# Testing for homoscedasticity
+significanceDfHov <- c(
+  HH::hov(cd24pos ~ cellLine, data=dataset3)$p.value,
+  HH::hov(cd24mid ~ cellLine, data=dataset3)$p.value,
+  HH::hov(cd24hi ~ cellLine, data=dataset3)$p.value,
+  HH::hov(cd24posProp ~ cellLine, data=dataset3)$p.value,
+  HH::hov(cd24midProp ~ cellLine, data=dataset3)$p.value,
+  HH::hov(cd24hiProp ~ cellLine, data=dataset3)$p.value
+)
+
+significanceDfBartlett <- c(
+  stats::bartlett.test(cd24pos ~ cellLine, data=dataset3)$p.value,
+  stats::bartlett.test(cd24mid ~ cellLine, data=dataset3)$p.value,
+  stats::bartlett.test(cd24hi ~ cellLine, data=dataset3)$p.value,
+  stats::bartlett.test(cd24posProp ~ cellLine, data=dataset3)$p.value,
+  stats::bartlett.test(cd24midProp ~ cellLine, data=dataset3)$p.value,
+  stats::bartlett.test(cd24hiProp ~ cellLine, data=dataset3)$p.value
+)
+
+significanceDfFligner <- c(
+  stats::fligner.test(cd24pos ~ cellLine, data=dataset3)$p.value,
+  stats::fligner.test(cd24mid ~ cellLine, data=dataset3)$p.value,
+  stats::fligner.test(cd24hi ~ cellLine, data=dataset3)$p.value,
+  stats::fligner.test(cd24posProp ~ cellLine, data=dataset3)$p.value,
+  stats::fligner.test(cd24midProp ~ cellLine, data=dataset3)$p.value,
+  stats::fligner.test(cd24hiProp ~ cellLine, data=dataset3)$p.value
+)
+
+```
+
+
+\newpage
+
+```{r significanceTestingAssumptionsGraphicNormality, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=12, fig.height=8}
+
+# Display multiplot in 2 rows and 3 columns
+graphics::par(mfrow=c(2, 3))
+
+# Base plots for univariate normality test
+stats::qqnorm(dataset3$cd24pos, main="CD24+ absolute count")
+stats::qqline(dataset3$cd24pos, col=colorPalette[["green"]])
+
+stats::qqnorm(dataset3$cd24mid, main="CD24mid absolute count")
+stats::qqline(dataset3$cd24mid, col=colorPalette[["green"]])
+
+stats::qqnorm(dataset3$cd24hi, main="CD24hi absolute count")
+stats::qqline(dataset3$cd24hi, col=colorPalette[["green"]])
+
+stats::qqnorm(dataset3$cd24posProp, main="CD24+ proportion")
+stats::qqline(dataset3$cd24posProp, col=colorPalette[["green"]])
+
+stats::qqnorm(dataset3$cd24midProp, main="CD24mid proportion")
+stats::qqline(dataset3$cd24midProp, col=colorPalette[["green"]])
+
+stats::qqnorm(dataset3$cd24hiProp, main="CD24hi proportion")
+stats::qqline(dataset3$cd24hiProp, col=colorPalette[["green"]])
+
+```
+
+
+\newpage
+
+```{r significanceTestingAssumptionsGraphicHomoscedasticity, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=18, fig.height=12}
+
+# Base plots for homoscedasticity test
+cd24posHov     <- HH::hovPlot(cd24pos ~ cellLine, data=dataset3)
+cd24midHov     <- HH::hovPlot(cd24mid ~ cellLine, data=dataset3)
+cd24hiHov      <- HH::hovPlot(cd24hi ~ cellLine, data=dataset3)
+cd24posPropHov <- HH::hovPlot(cd24posProp ~ cellLine, data=dataset3)
+cd24midPropHov <- HH::hovPlot(cd24midProp ~ cellLine, data=dataset3)
+cd24hiPropHov  <- HH::hovPlot(cd24hiProp ~ cellLine, data=dataset3)
+
+gridExtra::grid.arrange(
+  cd24posHov,     cd24midHov,     cd24hiHov,
+  cd24posPropHov, cd24midPropHov, cd24hiPropHov,
+  nrow=2,
+  top="Tests for homoscedasticity"
+)
+
+
+```
+
+
+\newpage
+
+The basic test we are interested in is whether there exists a difference in
+event counts between the two cell lines. In this case, event counts is the
+dependant variable, and the cell line is an independant variable. The basic
+notation for this is `(DependantVariable ~ IndependantVariable)`.
+
+In our experimental model, the independant variable `cellLine` is a fixed
+variable: it can either be '786-O' or 'VHL', with no possibility for error.
+Conversely, the dilution factor is not a fixed variable but is rather a random
+variable which must be taken into account: while a sample may be prepared to be
+diluted in a 1:120 ratio, there is inherent error or variability in instrument
+precision while making these measurements. This can be taken into account for
+the ANOVA with the notation `+ Error(RandomVariable/DependantVariable)`.
+
+
+```{r significanceTestingNumeric, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4.5}
+
+# Perform an anova on each parameter
+
+cd24posAov <- stats::aov(
+  cd24pos ~ cellLine + Error(dilution/cd24pos),
+  data=dataset3
+)
+
+cd24posPropAov <- stats::aov(
+  cd24posProp ~ cellLine + Error(dilution/cd24posProp),
+  data=dataset3
+)
+
+cd24midAov <- stats::aov(
+  cd24mid ~ cellLine + Error(dilution/cd24mid),
+  data=dataset3
+)
+
+cd24midPropAov <- stats::aov(
+  cd24midProp ~ cellLine + Error(dilution/cd24midProp),
+  data=dataset3
+)
+
+cd24hiAov <- stats::aov(
+  cd24hi ~ cellLine + Error(dilution/cd24hi),
+  data=dataset3
+)
+
+cd24hiPropAov <- stats::aov(
+  cd24hiProp ~ cellLine + Error(dilution/cd24hiProp),
+  data=dataset3
+)
+
+# Get the p-Value for each ANOVA performed
+significanceDfAnova <- c(
+  getANOVApValue(cd24posAov),
+  getANOVApValue(cd24posPropAov),
+  getANOVApValue(cd24midAov),
+  getANOVApValue(cd24midPropAov),
+  getANOVApValue(cd24hiAov),
+  getANOVApValue(cd24hiPropAov)
+)
+
+# Also perform a non-parametric equivalent of an ANOVA and retrieve the p-Values
+significanceDfKruskal <- c(
+  stats::kruskal.test(cd24pos ~ cellLine, data=dataset3)$p.value,
+  stats::kruskal.test(cd24mid ~ cellLine, data=dataset3)$p.value,
+  stats::kruskal.test(cd24hi ~ cellLine, data=dataset3)$p.value,
+  stats::kruskal.test(cd24posProp ~ cellLine, data=dataset3)$p.value,
+  stats::kruskal.test(cd24midProp ~ cellLine, data=dataset3)$p.value,
+  stats::kruskal.test(cd24hiProp ~ cellLine, data=dataset3)$p.value
+)
+
+# Create a big matrix with the p-Values for all the tests we did
+significanceDf <- cbind(
+  significanceDfShapiro,
+  significanceDfHov,
+  significanceDfBartlett,
+  significanceDfFligner,
+  significanceDfAnova,
+  significanceDfKruskal
+)
+
+# Ensure rows and columns are named correctly
+colnames(significanceDf) <- c(
+  "Shapiro-Wilk",
+  "Brown-Forsythe",
+  "Bartlett",
+  "Fligner-Killeen",
+  "ANOVA",
+  "Kruskal-Wallis"
+)
+
+significanceDfParameters <- c(
+  "cd24pos",
+  "cd24mid",
+  "cd24hi",
+  "cd24posProp",
+  "cd24midProp",
+  "cd24hiProp"
+)
+
+row.names(significanceDf) <- significanceDfParameters
+
+# Convert the matrix into a dataframe
+significanceDf <- data.frame(significanceDf)
+
+# Let's see what we have
+printDataFrame(
+  dataframe=significanceDf,
+  caption="Assumption testing and ANOVA significance testing summary",
+  fontsize=7
+)
+
+```
+
+
+```{r significanceTestingTidy, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
+
+# Transform this dataframe into a tidy format for plotting purposes
+significanceDfMolten <- significanceDf
+significanceDfMolten$parameter <- row.names(significanceDf)
+significanceDfMolten <- reshape2::melt(
+  data=significanceDfMolten,
+  id.vars="parameter",
+  value.name="p",
+  variable.name="test"
+)
+
+# Break down p-Value into discrete intervals
+significanceDfMolten$pDiscrete <- cut(
+  significanceDfMolten$p,
+  breaks=c(0.00, 0.01, 0.05, 0.10, 0.15, 0.20, 0.25, 1.00),
+  labels=c(
+    "p < 0.01",
+    "p < 0.05",
+    "p < 0.10",
+    "p < 0.15",
+    "p < 0.20",
+    "p < 0.25",
+    "p > 0.25"
+  )
+)
+
+# Make sure the levels is plotted from top to bottom in order
+significanceDfMolten$parameter <- factor(
+  as.character(significanceDfMolten$parameter),
+  levels=rev(significanceDfParameters)
+)
+
+```
+
+
+\newpage
+
+```{r significanceTestingTidy2, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
+
+# Let's see what we have
+printDataFrame(
+  dataframe=significanceDfMolten,
+  caption=
+    "Assumption testing and ANOVA significance testing summary (longform)",
+  fontsize=7
+)
+
+```
+
+
+\newpage
+
+```{r significanceTestingGraphic1, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
+
+# Create a heat map of p-Values for each parameter
+heatmap <- ggplot2::ggplot(
+  data=significanceDfMolten,
+  mapping=ggplot2::aes(
+    x=test,
+    y=parameter)
+) +
+  ggplot2::geom_tile(
+    mapping=ggplot2::aes(fill=pDiscrete),
+    colour="white",
+    size=1) +
+  ggplot2::geom_text(
+    mapping=ggplot2::aes(label=sprintf("%.2f", round(p, digits=2))),
+    colour="white",
+    fontface="bold",
+    size=3) +
+  ggplot2::labs(
+    title="Assumption testing and ANOVA significance testing summary",
+    subtitle="Swarm-deconvoluted and denoised event counts",
+    x="",
+    y="") +
+  ggplot2::scale_y_discrete(expand=c(0, 0)) +
+  ggplot2::scale_x_discrete(
+    expand=c(0, 0),
+    position="top") +
+  ggplot2::scale_fill_manual(
+    values=c(
+      "#d53e4f",
+      "#f46d43",
+      "#fdae61",
+      "#fee08b",
+      "#e6f598",
+      "#abdda4",
+      "#ddf1da"),
+    na.value="grey90") +
+  ggplot2::theme(
+    plot.background=ggplot2::element_blank(),
+    legend.title=ggplot2::element_blank(),
+    axis.text.x=ggplot2::element_text(
+      angle=90,
+      hjust=0,
+      vjust=0.5))
+
+```
+
+
+\newpage
+
+A Shapiro-Wilk test statistic > 0.05 indicates that the univariate normality condition is met. While normality is technically a test assumption, in practice the ANOVA is relatively robust to departures from normality.
+
+A Brown-Forsythe test statistic > 0.05 indicates that the condition for homoscedasticity is met. This test is better suited to minor departures from normality.
+
+A Bartlett test statistic > 0.05 indicates that the condition for homoscedasticity is met. This test is very sensitive to minor departures from normality.
+
+A Fligner-Killeen test statistic > 0.05 indicates that the condition for homoscedasticity is met. This test is less sensitive to departures from normality or to the influence of outliers. Failing other tests but meeting the Fligner-Killeen test could justify the downstream use of nonparametric methods (Such as the Kruskal-Wallis rank sum test instead of the ANOVA).
+
+```{r significanceTestingGraphic2, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4.5}
+
+# Visualization
+heatmap
+
+```
+
+The results of significance testing for our data appear to indicate a
+statistically significant difference between 786-O and VHL cell-derived
+extracellular vesicles for the absolute count of cd24mid events, as well as for
+the overall proportion of CD24+ events and the overall proportion of cd24mid
+events.
+
+```{r varianceReductionCalculationCD24mid, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4.5}
+datasetNormalizedForLm <- normalizedExperiment
+
+datasetNormalizedForLm <- datasetNormalizedForLm %>%
+  dplyr::mutate_at(
+    c("events", "cd24pos", "cd24mid", "cd24hi", "dilution"),
+    ~ (scale(.) %>% as.vector)
+  )
+
+lmFitBase <- stats::lm(
+  cd24mid ~ cellLine,
+  data=datasetNormalizedForLm
+)
+
+lmFitDilution <- stats::lm(
+  cd24mid ~ cellLine + dilution,
+  data=datasetNormalizedForLm
+)
+
+lmFitSwarmDilution <- stats::lm(
+  cd24mid ~ cellLine + cd24midTp + dilution,
+  data=datasetNormalizedForLm
+)
+
+afBase <- stats::anova(lmFitBase)
+afBase$percentVariance <- (afBase$"Sum Sq" / sum(afBase$"Sum Sq")) * 100
+
+afBase
+
+afDilution <- stats::anova(lmFitDilution)
+afDilution$percentVariance <-
+  (afDilution$"Sum Sq" / sum(afDilution$"Sum Sq")) * 100
+
+afDilution
+
+afSwarmDilution <- stats::anova(lmFitSwarmDilution)
+afSwarmDilution$percentVariance <-
+  (afSwarmDilution$"Sum Sq" / sum(afSwarmDilution$"Sum Sq")) * 100
+
+afSwarmDilution
+
+decreaseInVarianceFromDilution <- 1 - (
+  afSwarmDilution["dilution", "percentVariance"]
+    / afDilution["dilution", "percentVariance"])
+
+decreaseInVarianceFromDilution
+```
+
+```{r varianceReductionCalculationCD24hi, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4.5}
+datasetNormalizedForLm <- normalizedExperiment
+
+datasetNormalizedForLm <- datasetNormalizedForLm %>%
+  dplyr::mutate_at(
+    c("events", "cd24pos", "cd24mid", "cd24hi", "dilution"),
+    ~ (scale(.) %>% as.vector)
+  )
+
+lmFitBase <- stats::lm(
+  cd24hi ~ cellLine,
+  data=datasetNormalizedForLm
+)
+
+lmFitDilution <- stats::lm(
+  cd24hi ~ cellLine + dilution,
+  data=datasetNormalizedForLm
+)
+
+lmFitSwarmDilution <- stats::lm(
+  cd24hi ~ cellLine + cd24hiTp + dilution,
+  data=datasetNormalizedForLm
+)
+
+afBase <- stats::anova(lmFitBase)
+afBase$percentVariance <- (afBase$"Sum Sq" / sum(afBase$"Sum Sq")) * 100
+
+afBase
+
+afDilution <- stats::anova(lmFitDilution)
+afDilution$percentVariance <-
+  (afDilution$"Sum Sq" / sum(afDilution$"Sum Sq")) * 100
+
+afDilution
+
+afSwarmDilution <- stats::anova(lmFitSwarmDilution)
+afSwarmDilution$percentVariance <-
+  (afSwarmDilution$"Sum Sq" / sum(afSwarmDilution$"Sum Sq")) * 100
+
+afSwarmDilution
+
+decreaseInVarianceFromDilution <- 1 - (
+  afSwarmDilution["dilution", "percentVariance"]
+    / afDilution["dilution", "percentVariance"])
+
+decreaseInVarianceFromDilution
+```
+
+```{r varianceReductionCalculationCD24pos, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4.5}
+datasetNormalizedForLm <- normalizedExperiment
+
+datasetNormalizedForLm <- datasetNormalizedForLm %>%
+  dplyr::mutate_at(
+    c("events", "cd24pos", "cd24mid", "cd24hi", "dilution"),
+    ~ (scale(.) %>% as.vector)
+  )
+
+lmFitBase <- stats::lm(
+  cd24pos ~ cellLine,
+  data=datasetNormalizedForLm
+)
+
+lmFitDilution <- stats::lm(
+  cd24pos ~ cellLine + dilution,
+  data=datasetNormalizedForLm
+)
+
+lmFitSwarmDilution <- stats::lm(
+  cd24pos ~ cellLine + cd24posTp + dilution,
+  data=datasetNormalizedForLm
+)
+
+afBase <- stats::anova(lmFitBase)
+afBase$percentVariance <- (afBase$"Sum Sq" / sum(afBase$"Sum Sq")) * 100
+
+afBase
+
+afDilution <- stats::anova(lmFitDilution)
+afDilution$percentVariance <-
+  (afDilution$"Sum Sq" / sum(afDilution$"Sum Sq")) * 100
+
+afDilution
+
+afSwarmDilution <- stats::anova(lmFitSwarmDilution)
+afSwarmDilution$percentVariance <-
+  (afSwarmDilution$"Sum Sq" / sum(afSwarmDilution$"Sum Sq")) * 100
+
+afSwarmDilution
+
+decreaseInVarianceFromDilution <- 1 - (
+  afSwarmDilution["dilution", "percentVariance"]
+    / afDilution["dilution", "percentVariance"])
+
+decreaseInVarianceFromDilution
+```
+
+```{r typeIIIAnovaCD24mid, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE}
+
+type3Anova <- car::Anova(
+  stats::lm(
+    cd24mid ~ cellLine + cd24midTp + dilution,
+    data=datasetNormalizedForLm,
+  ),
+  type=3
+)
+
+type3Anova$percentVariance <-
+  (type3Anova$"Sum Sq" / sum(type3Anova$"Sum Sq")) * 100
+
+type3Anova
+```
+\newpage
+
+```{r typeIIIAnovaCD24hi, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE}
+
+type3Anova <- car::Anova(
+  stats::lm(
+    cd24hi ~ cellLine + cd24hiTp + dilution,
+    data=datasetNormalizedForLm,
+  ),
+  type=3
+)
+
+type3Anova$percentVariance <-
+  (type3Anova$"Sum Sq" / sum(type3Anova$"Sum Sq")) * 100
+
+type3Anova
+```
+
+```{r typeIIIAnovaCD24pos, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE}
+
+type3Anova <- car::Anova(
+  stats::lm(
+    cd24pos ~ cellLine + cd24posTp + dilution,
+    data=datasetNormalizedForLm,
+  ),
+  type=3
+)
+
+type3Anova$percentVariance <-
+  (type3Anova$"Sum Sq" / sum(type3Anova$"Sum Sq")) * 100
+
+type3Anova
+```
+
+# References
+
+
