@@ -2,3 +2,5 @@
 Figs/
 graphs/
 *.archive
+*.log
+*.tex
