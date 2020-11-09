@@ -1,6 +1,3 @@
 .DS_Store
-Figs/
-graphs/
-*.archive
 *.log
 *.tex
