@@ -155,12 +155,9 @@ safeClustering <- function(
   centers=matrix(data=c(0, 0, 0, 0), ncol=2),
   principal=1
 ) {
-  # Linter bindings
-  cluster <- NULL
-
   attemptClustering <- try(
     expr={
-      km <- stats::kmeans(data, centers=centers)$cluster
+      km <- stats::kmeans(data, centers=centers)[["cluster"]]
     },
     silent=TRUE
   )
@@ -271,7 +268,7 @@ The `AnnotatedDataFrame` is then created directly from `pData`, an object of typ
 ```{r annotatedDataFrame, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE}
 
 # Otherwise flowCore::read.flowSet() doesn't work
-pData$filename <- row.names(pData)
+pData[["filename"]] <- row.names(pData)
 
 phenoData <- new(
   "AnnotatedDataFrame",
@@ -390,7 +387,7 @@ keywords <- flowCore::keyword(gatingset[[1]])
 
 # Format
 keywordsDataFrame <- data.frame(BiocGenerics::t(data.frame(keywords)))
-keywordsDataFrame$key <- BiocGenerics::rownames(keywordsDataFrame)
+keywordsDataFrame[["key"]] <- BiocGenerics::rownames(keywordsDataFrame)
 keywordsDataFrame <- keywordsDataFrame[c(2, 1)] # Reorder columns
 
 BiocGenerics::colnames(keywordsDataFrame) <- c("key", "value")
@@ -900,30 +897,30 @@ cd24midData <- flowWorkspace::cytoset_to_flowSet(cd24midData)
 cd24hiData <- flowWorkspace::gs_pop_get_data(gatingset, "cd24hi")
 cd24hiData <- flowWorkspace::cytoset_to_flowSet(cd24hiData)
 
-eventsData@phenoData@data$dilution <- factor(
-  eventsData@phenoData@data$dilution,
+eventsData@phenoData@data[["dilution"]] <- factor(
+  eventsData@phenoData@data[["dilution"]],
   levels=dilutionOrdering)
-cd24negData@phenoData@data$dilution <- factor(
-  cd24negData@phenoData@data$dilution,
+cd24negData@phenoData@data[["dilution"]] <- factor(
+  cd24negData@phenoData@data[["dilution"]],
   levels=dilutionOrdering)
-cd24midData@phenoData@data$dilution <- factor(
-  cd24midData@phenoData@data$dilution,
+cd24midData@phenoData@data[["dilution"]] <- factor(
+  cd24midData@phenoData@data[["dilution"]],
   levels=dilutionOrdering)
-cd24hiData@phenoData@data$dilution <- factor(
-  cd24hiData@phenoData@data$dilution,
+cd24hiData@phenoData@data[["dilution"]] <- factor(
+  cd24hiData@phenoData@data[["dilution"]],
   levels=dilutionOrdering)
 
-eventsData@phenoData@data$cellLine <- factor(
-  eventsData@phenoData@data$cellLine,
+eventsData@phenoData@data[["cellLine"]] <- factor(
+  eventsData@phenoData@data[["cellLine"]],
   levels=cellLineOrdering)
-cd24negData@phenoData@data$cellLine <- factor(
-  cd24negData@phenoData@data$cellLine,
+cd24negData@phenoData@data[["cellLine"]] <- factor(
+  cd24negData@phenoData@data[["cellLine"]],
   levels=cellLineOrdering)
-cd24midData@phenoData@data$cellLine <- factor(
-  cd24midData@phenoData@data$cellLine,
+cd24midData@phenoData@data[["cellLine"]] <- factor(
+  cd24midData@phenoData@data[["cellLine"]],
   levels=cellLineOrdering)
-cd24hiData@phenoData@data$cellLine <- factor(
-  cd24hiData@phenoData@data$cellLine,
+cd24hiData@phenoData@data[["cellLine"]] <- factor(
+  cd24hiData@phenoData@data[["cellLine"]],
   levels=cellLineOrdering)
 
 ggplot2::ggplot(
@@ -1011,15 +1008,15 @@ generateSwarmModel <- function(
 
     # Extract important results obtained from normalmixEM()
     distribution1 <- c(
-      "mu"         = mixEM$mu[1],
-      "sigma"      = mixEM$sigma[1],
-      "proportion" = mixEM$lambda[1]
+      "mu"         = mixEM[["mu"]][1],
+      "sigma"      = mixEM[["sigma"]][1],
+      "proportion" = mixEM[["lambda"]][1]
     )
 
     distribution2 <- c(
-      "mu"         = mixEM$mu[2],
-      "sigma"      = mixEM$sigma[2],
-      "proportion" = mixEM$lambda[2]
+      "mu"         = mixEM[["mu"]][2],
+      "sigma"      = mixEM[["sigma"]][2],
+      "proportion" = mixEM[["lambda"]][2]
     )
 
     # Ensure we correctly identify the true positive distribution
@@ -1032,7 +1029,7 @@ generateSwarmModel <- function(
     }
 
     hartigansDipTestStatistic <-
-      diptest::dip.test(y, B=2000, simulate.p.value=FALSE)$p.value
+      diptest::dip.test(y, B=2000, simulate.p.value=FALSE)[["p.value"]]
 
     # Assign values to the appropriate columns
     swarmModel[[i]] <- c(
@@ -1053,19 +1050,19 @@ generateSwarmModel <- function(
   )
 
   # Compute number of events in each distribution
-  swarmModel$nNeg <- round(length(y) * swarmModel$pNeg, digits=0)
-  swarmModel$nPos <- round(length(y) * swarmModel$pPos, digits=0)
+  swarmModel[["nNeg"]] <- round(length(y) * swarmModel[["pNeg"]], digits=0)
+  swarmModel[["nPos"]] <- round(length(y) * swarmModel[["pPos"]], digits=0)
 
   # Population statistics
-  swarmModel$welchTTest <-
-    abs(swarmModel$muNeg - swarmModel$muPos) /
+  swarmModel[["welchTTest"]] <-
+    abs(swarmModel[["muNeg"]] - swarmModel[["muPos"]]) /
       sqrt(
-        ((swarmModel$sigmaNeg^4)/swarmModel$nNeg) +
-        ((swarmModel$sigmaPos^4)/swarmModel$nPos))
+        ((swarmModel[["sigmaNeg"]]^4)/swarmModel[["nNeg"]]) +
+        ((swarmModel[["sigmaPos"]]^4)/swarmModel[["nPos"]]))
 
   # Assign faceting values for plotting convenience
-  swarmModel$facetRow <- pData$facetRow
-  swarmModel$facetCol <- pData$facetCol
+  swarmModel[["facetRow"]] <- pData[["facetRow"]]
+  swarmModel[["facetCol"]] <- pData[["facetCol"]]
 
   swarmModel
 }
@@ -1076,8 +1073,8 @@ cd24midSwarmModel <- generateSwarmModel(
   gs=gatingset,
   axis="SS.Log",
   gate="cd24mid",
-  mu=estimate$mu,
-  sigma=estimate$sigma,
+  mu=estimate[["mu"]],
+  sigma=estimate[["sigma"]],
   maxIterations=10000
 )
 
@@ -1111,7 +1108,7 @@ clusterModel <- function(
 ) {
   numberOfClusters <- BiocGenerics::nrow(centers)
 
-  model$negCluster <- factor(
+  model[["negCluster"]] <- factor(
     safeClustering(
       data=model[, c("muNeg", "sigmaNeg")],
       centers=centers,
@@ -1120,7 +1117,7 @@ clusterModel <- function(
     levels=seq_len(numberOfClusters)
   )
 
-  model$posCluster <- factor(
+  model[["posCluster"]] <- factor(
     safeClustering(
       data=model[, c("muPos", "sigmaPos")],
       centers=centers,
@@ -1192,7 +1189,7 @@ plotModelClusters <- function(model, ylim=c(0, 1023), xlim=c(0, 1023)) {
 
 cd24midSwarmModel <- clusterModel(
   model=cd24midSwarmModel,
-  centers=matrix(c(estimate$mu, estimate$sigma), ncol=2)
+  centers=matrix(c(estimate[["mu"]], estimate[["sigma"]]), ncol=2)
 )
 
 plotModelClusters(
@@ -1262,10 +1259,10 @@ printDataFrame(
 
 applyGlobalParameters <- function(model, params) {
   # Update our model with our best global parameter estimates
-  model$muNeg    <- params["neg", "mu"]
-  model$sigmaNeg <- params["neg", "sigma"]
-  model$muPos    <- params["pos", "mu"]
-  model$sigmaPos <- params["pos", "sigma"]
+  model[["muNeg"]]    <- params["neg", "mu"]
+  model[["sigmaNeg"]] <- params["neg", "sigma"]
+  model[["muPos"]]    <- params["pos", "mu"]
+  model[["sigmaPos"]] <- params["pos", "sigma"]
   model
 }
 
@@ -1371,9 +1368,9 @@ solveSwarmProportions <- function(gs, gate, axis, model) {
   nTot <-
   alpha <- NULL
 
-  populationsMu <- c(model$muNeg[1], model$muPos[1])
-  populationsSd <- c(model$sigmaNeg[1], model$sigmaPos[1])
-  populationsProportions <- c(model$pNeg[1], model$pPos[1])
+  populationsMu <- c(model[["muNeg"]][1], model[["muPos"]][1])
+  populationsSd <- c(model[["sigmaNeg"]][1], model[["sigmaPos"]][1])
+  populationsProportions <- c(model[["pNeg"]][1], model[["pPos"]][1])
 
   numberOfSamples <- length(flowWorkspace::sampleNames(gs))
 
@@ -1416,14 +1413,14 @@ solveSwarmProportions <- function(gs, gate, axis, model) {
         }
       }
 
-      model$pNeg[i] <- mStepResult$alpha[1]
-      model$pPos[i] <- mStepResult$alpha[2]
+      model[["pNeg"]][i] <- mStepResult[["alpha"]][1]
+      model[["pPos"]][i] <- mStepResult[["alpha"]][2]
     }
   }
 
-  model$nTot <- model$nNeg + model$nPos
-  model$nNeg <- round(model$nTot * model$pNeg, digits=0)
-  model$nPos <- round(model$nTot * model$pPos, digits=0)
+  model[["nTot"]] <- model[["nNeg"]] + model[["nPos"]]
+  model[["nNeg"]] <- round(model[["nTot"]] * model[["pNeg"]], digits=0)
+  model[["nPos"]] <- round(model[["nTot"]] * model[["pPos"]], digits=0)
   model
 }
 
@@ -1467,10 +1464,18 @@ genDistributionsForPlotting <- function(model) {
     x <- seq(0, 1023)
 
     negDistribution <-
-      stats::dnorm(x, mean=model$muNeg[i], sd=model$sigmaNeg[i]) * model$pNeg[i]
+      stats::dnorm(
+        x,
+        mean=model[["muNeg"]][i],
+        sd=model[["sigmaNeg"]][i]
+      ) * model[["pNeg"]][i]
 
     posDistribution <-
-      stats::dnorm(x, mean=model$muPos[i], sd=model$sigmaPos[i]) * model$pPos[i]
+      stats::dnorm(
+        x,
+        mean=model[["muPos"]][i],
+        sd=model[["sigmaPos"]][i]
+      ) * model[["pPos"]][i]
 
     facetRow <- paste0("r", ((i-1) %/% 6)+1)
     facetCol <- paste0("c", ((i-1) %% 6)+1)
@@ -1636,18 +1641,18 @@ distForAggregatePlotting <- function(model) {
 
     negDistribution <- stats::dnorm(
       x,
-      mean=model$muNeg[i],
-      sd=model$sigmaNeg[i]
-    ) * model$pNeg[i]
+      mean=model[["muNeg"]][i],
+      sd=model[["sigmaNeg"]][i]
+    ) * model[["pNeg"]][i]
 
     posDistribution <- stats::dnorm(
       x,
-      mean=model$muPos[i],
-      sd=model$sigmaPos[i]
-    ) * model$pPos[i]
+      mean=model[["muPos"]][i],
+      sd=model[["sigmaPos"]][i]
+    ) * model[["pPos"]][i]
 
-    cellLine <- model$cellLine[i]
-    dilution <- model$dilution[i]
+    cellLine <- model[["cellLine"]][i]
+    dilution <- model[["dilution"]][i]
 
     tempData <- data.frame(
       "distributionXAxis" = x,
@@ -1713,29 +1718,29 @@ plotDeconvAggregateExperiment <- function(gs, model, gate, axis) {
   cellLineOrdering <- c("786-O", "VHL")
   dilutionOrdering <- c("20", "60", "100", "140", "180", "220")
 
-  model$cellLine <- factor(model$cellLine, levels=cellLineOrdering)
-  model$dilution <- factor(model$dilution, levels=dilutionOrdering)
+  model[["cellLine"]] <- factor(model[["cellLine"]], levels=cellLineOrdering)
+  model[["dilution"]] <- factor(model[["dilution"]], levels=dilutionOrdering)
 
-  mixedModelDistributions$cellLine <- factor(
-    mixedModelDistributions$cellLine,
+  mixedModelDistributions[["cellLine"]] <- factor(
+    mixedModelDistributions[["cellLine"]],
     levels=cellLineOrdering
   )
 
-  mixedModelDistributions$dilution <- factor(
-    mixedModelDistributions$dilution,
+  mixedModelDistributions[["dilution"]] <- factor(
+    mixedModelDistributions[["dilution"]],
     levels=c(dilutionOrdering)
   )
 
   data <- flowWorkspace::gs_pop_get_data(gs, gate)
   data <- flowWorkspace::cytoset_to_flowSet(data)
 
-  data@phenoData@data$dilution <- factor(
-    data@phenoData@data$dilution,
+  data@phenoData@data[["dilution"]] <- factor(
+    data@phenoData@data[["dilution"]],
     levels=dilutionOrdering
   )
 
-  data@phenoData@data$cellLine <- factor(
-    data@phenoData@data$cellLine,
+  data@phenoData@data[["cellLine"]] <- factor(
+    data@phenoData@data[["cellLine"]],
     levels=cellLineOrdering
   )
 
@@ -1863,40 +1868,44 @@ for (sampleName in sampleNames) {
   # https://github.com/RGLab/flowWorkspace/issues/341#issuecomment-691742173
   escapedSampleName <- gsub("[/:\\\\]", "_", sampleName)
   sampleStatistic <- populationStatistics %>%
-    dplyr::filter(populationStatistics$name == escapedSampleName)
+    dplyr::filter(populationStatistics[["name"]] == escapedSampleName)
 
-  sampleStatistic$population <- sampleStatistic$population %>%
+  sampleStatistic[["population"]] <- sampleStatistic[["population"]] %>%
     purrr::map(function(x) {
       tail(strsplit(x, "/")[[1]], n=1)
     })
 
   for (populationName in populations) {
     samplePopulationStatistic <- sampleStatistic %>%
-      dplyr::filter(sampleStatistic$population == populationName)
+      dplyr::filter(sampleStatistic[["population"]] == populationName)
 
-    experiment[sampleName, populationName] <- samplePopulationStatistic$count
+    experiment[sampleName, populationName] <-
+      samplePopulationStatistic[["count"]]
   }
 }
 
 orderOfCellLines <- c("786-O", "VHL")
 
-experiment$temps    <- as.factor(experiment$temps)
-experiment$a23187   <- as.factor(experiment$a23187)
-experiment$n        <- as.factor(experiment$n)
-experiment$cellLine <- factor(experiment$cellLine, levels=orderOfCellLines)
+experiment[["temps"]]    <- as.factor(experiment[["temps"]])
+experiment[["a23187"]]   <- as.factor(experiment[["a23187"]])
+experiment[["n"]]        <- as.factor(experiment[["n"]])
+experiment[["cellLine"]] <- factor(
+  experiment[["cellLine"]],
+  levels=orderOfCellLines
+)
 
 # Integrate swarm deconvolution data. The true-positive statistic for the CD24+
 # population can be derived from cd24mid and cd24hi
-experiment$cd24midTp <- cd24midSwarmModel$pPos
-experiment$cd24hiTp  <- cd24hiSwarmModel$pPos
-experiment$cd24posTp <- (
-  (experiment$cd24mid * experiment$cd24midTp) +
-  (experiment$cd24hi * experiment$cd24hiTp)) / experiment$cd24pos
+experiment[["cd24midTp"]] <- cd24midSwarmModel[["pPos"]]
+experiment[["cd24hiTp"]]  <- cd24hiSwarmModel[["pPos"]]
+experiment[["cd24posTp"]] <- (
+  (experiment[["cd24mid"]] * experiment[["cd24midTp"]]) +
+  (experiment[["cd24hi"]] * experiment[["cd24hiTp"]])) / experiment[["cd24pos"]]
 
 # Let's not go too crazy with significant digits
-experiment$cd24midTp <- round(experiment$cd24midTp, 3)
-experiment$cd24hiTp  <- round(experiment$cd24hiTp, 3)
-experiment$cd24posTp <- round(experiment$cd24posTp, 3)
+experiment[["cd24midTp"]] <- round(experiment[["cd24midTp"]], 3)
+experiment[["cd24hiTp"]]  <- round(experiment[["cd24hiTp"]], 3)
+experiment[["cd24posTp"]] <- round(experiment[["cd24posTp"]], 3)
 
 ```
 
@@ -1934,38 +1943,43 @@ normalizedToXBeads <- 5000
 
 normalizedExperiment <- experiment
 
-normalizedExperiment$events <-
-  (experiment$events / experiment$beads) *
-    normalizedToXBeads * experiment$dilution * 10
+normalizedExperiment[["events"]] <-
+  (experiment[["events"]] / experiment[["beads"]]) *
+    normalizedToXBeads * experiment[["dilution"]] * 10
 
-normalizedExperiment$cd24pos <-
-  (experiment$cd24pos / experiment$beads) *
-    normalizedToXBeads * experiment$dilution * 10
+normalizedExperiment[["cd24pos"]] <-
+  (experiment[["cd24pos"]] / experiment[["beads"]]) *
+    normalizedToXBeads * experiment[["dilution"]] * 10
 
-normalizedExperiment$cd24neg <-
-  (experiment$cd24neg / experiment$beads) *
-    normalizedToXBeads * experiment$dilution * 10
+normalizedExperiment[["cd24neg"]] <-
+  (experiment[["cd24neg"]] / experiment[["beads"]]) *
+    normalizedToXBeads * experiment[["dilution"]] * 10
 
-normalizedExperiment$cd24mid <-
-  (experiment$cd24mid / experiment$beads) *
-    normalizedToXBeads * experiment$dilution * 10
+normalizedExperiment[["cd24mid"]] <-
+  (experiment[["cd24mid"]] / experiment[["beads"]]) *
+    normalizedToXBeads * experiment[["dilution"]] * 10
 
-normalizedExperiment$cd24hi <-
-  (experiment$cd24hi / experiment$beads) *
-    normalizedToXBeads * experiment$dilution * 10
+normalizedExperiment[["cd24hi"]] <-
+  (experiment[["cd24hi"]] / experiment[["beads"]]) *
+    normalizedToXBeads * experiment[["dilution"]] * 10
 
 # To be or not to be, that is the question.
-normalizedExperiment$events  <- round(normalizedExperiment$events,  digits=0)
-normalizedExperiment$cd24pos <- round(normalizedExperiment$cd24pos, digits=0)
-normalizedExperiment$cd24neg <- round(normalizedExperiment$cd24neg, digits=0)
-normalizedExperiment$cd24mid <- round(normalizedExperiment$cd24mid, digits=0)
-normalizedExperiment$cd24hi  <- round(normalizedExperiment$cd24hi,  digits=0)
+normalizedExperiment[["events"]] <-
+  round(normalizedExperiment[["events"]], digits=0)
+normalizedExperiment[["cd24pos"]] <-
+  round(normalizedExperiment[["cd24pos"]], digits=0)
+normalizedExperiment[["cd24neg"]] <-
+  round(normalizedExperiment[["cd24neg"]], digits=0)
+normalizedExperiment[["cd24mid"]] <-
+  round(normalizedExperiment[["cd24mid"]], digits=0)
+normalizedExperiment[["cd24hi"]] <-
+  round(normalizedExperiment[["cd24hi"]], digits=0)
 
 # For normalized data, bead counts lose their significance...
 # but we may be interested in the events' corresponding concentration
 # in undiluted conditioned-medium (CM)
-normalizedExperiment$beads    <- NULL
-normalizedExperiment$cmVolume <- 40 # TEMPORARY, FIX THIS
+normalizedExperiment[["beads"]]    <- NULL
+normalizedExperiment[["cmVolume"]] <- 40
 
 ```
 
@@ -2005,13 +2019,13 @@ printDataFrame(
 
 dataset1 <- normalizedExperiment
 
-dataset1$cd24posTp <- NULL
-dataset1$cd24midTp <- NULL
-dataset1$cd24hiTp <- NULL
+dataset1[["cd24posTp"]] <- NULL
+dataset1[["cd24midTp"]] <- NULL
+dataset1[["cd24hiTp"]] <- NULL
 
-dataset1$cd24posProp <- dataset1$cd24pos / dataset1$events
-dataset1$cd24midProp <- dataset1$cd24mid / dataset1$events
-dataset1$cd24hiProp <- dataset1$cd24hi / dataset1$events
+dataset1[["cd24posProp"]] <- dataset1[["cd24pos"]] / dataset1[["events"]]
+dataset1[["cd24midProp"]] <- dataset1[["cd24mid"]] / dataset1[["events"]]
+dataset1[["cd24hiProp"]] <- dataset1[["cd24hi"]] / dataset1[["events"]]
 
 interestingColumns <- c(
   "cmVolume",
@@ -2044,17 +2058,17 @@ printDataFrame(
 
 dataset2 <- normalizedExperiment
 
-dataset2$cd24mid <- dataset2$cd24mid * dataset2$cd24midTp
-dataset2$cd24hi  <- dataset2$cd24hi  * dataset2$cd24hiTp
-dataset2$cd24pos <- dataset2$cd24mid + dataset2$cd24hi
+dataset2[["cd24mid"]] <- dataset2[["cd24mid"]] * dataset2[["cd24midTp"]]
+dataset2[["cd24hi"]]  <- dataset2[["cd24hi"]]  * dataset2[["cd24hiTp"]]
+dataset2[["cd24pos"]] <- dataset2[["cd24mid"]] + dataset2[["cd24hi"]]
 
-dataset2$cd24posProp <- dataset2$cd24pos / dataset2$events
-dataset2$cd24midProp <- dataset2$cd24mid / dataset2$events
-dataset2$cd24hiProp  <- dataset2$cd24hi  / dataset2$events
+dataset2[["cd24posProp"]] <- dataset2[["cd24pos"]] / dataset2[["events"]]
+dataset2[["cd24midProp"]] <- dataset2[["cd24mid"]] / dataset2[["events"]]
+dataset2[["cd24hiProp"]]  <- dataset2[["cd24hi"]]  / dataset2[["events"]]
 
-dataset2$cd24posTp <- NULL
-dataset2$cd24midTp <- NULL
-dataset2$cd24hiTp  <- NULL
+dataset2[["cd24posTp"]] <- NULL
+dataset2[["cd24midTp"]] <- NULL
+dataset2[["cd24hiTp"]]  <- NULL
 
 printDataFrame(
   dataframe=dataset2[, interestingColumns],
@@ -2085,39 +2099,39 @@ subtractNoise <- function(noiseCeiling, events, tpRate, beads, dilution) {
 cd24hiNoiseCeiling <- optimize(
   f=subtractNoise,
   interval=c(1, 5000),
-  events=experiment$cd24hi,
-  tpRate=experiment$cd24hiTp,
-  beads=experiment$beads,
-  dilution=experiment$dilution
+  events=experiment[["cd24hi"]],
+  tpRate=experiment[["cd24hiTp"]],
+  beads=experiment[["beads"]],
+  dilution=experiment[["dilution"]]
 )$minimum
 
 cd24midNoiseCeiling <- optimize(
   f=subtractNoise,
   interval=c(100, 10000),
-  events=experiment$cd24mid,
-  tpRate=experiment$cd24midTp,
-  beads=experiment$beads,
-  dilution=experiment$dilution
+  events=experiment[["cd24mid"]],
+  tpRate=experiment[["cd24midTp"]],
+  beads=experiment[["beads"]],
+  dilution=experiment[["dilution"]]
 )$minimum
 
 cd24negNoiseCeiling <- optimize(
   f=subtractNoise,
   interval=c(100, 9000),
-  events=experiment$cd24neg,
+  events=experiment[["cd24neg"]],
   tpRate=1,
-  beads=experiment$beads,
-  dilution=experiment$dilution
+  beads=experiment[["beads"]],
+  dilution=experiment[["dilution"]]
 )$minimum
 
 # Make sure the noiseCeiling is not set above the measured signal
-if (any(experiment$cd24hi < cd24hiNoiseCeiling)) {
-  cd24hiNoiseCeiling <- min(experiment$cd24hi)
+if (any(experiment[["cd24hi"]] < cd24hiNoiseCeiling)) {
+  cd24hiNoiseCeiling <- min(experiment[["cd24hi"]])
 }
-if (any(experiment$cd24mid < cd24midNoiseCeiling)) {
-  cd24midNoiseCeiling <- min(experiment$cd24mid)
+if (any(experiment[["cd24mid"]] < cd24midNoiseCeiling)) {
+  cd24midNoiseCeiling <- min(experiment[["cd24mid"]])
 }
-if (any(experiment$cd24neg < cd24negNoiseCeiling)) {
-  cd24negNoiseCeiling <- min(experiment$cd24neg)
+if (any(experiment[["cd24neg"]] < cd24negNoiseCeiling)) {
+  cd24negNoiseCeiling <- min(experiment[["cd24neg"]])
 }
 
 list(
@@ -2137,40 +2151,44 @@ list(
 dataset3 <- experiment
 
 # Normalize with noise reduction
-factor <- (experiment$dilution * normalizedToXBeads * 10) / experiment$beads
+factor <-
+  (experiment[["dilution"]] * normalizedToXBeads * 10) / experiment[["beads"]]
 
-dataset3$cd24mid <- (
-  (experiment$cd24mid * experiment$cd24midTp) - cd24midNoiseCeiling) * factor
+dataset3[["cd24mid"]] <-
+  ((experiment[["cd24mid"]] * experiment[["cd24midTp"]])
+    - cd24midNoiseCeiling) * factor
 
-dataset3$cd24hi <- (
-  (experiment$cd24hi * experiment$cd24hiTp) - cd24hiNoiseCeiling) * factor
+dataset3[["cd24hi"]] <-
+  ((experiment[["cd24hi"]] * experiment[["cd24hiTp"]])
+    - cd24hiNoiseCeiling) * factor
 
-dataset3$cd24neg <- (experiment$cd24neg - cd24negNoiseCeiling) * factor
+dataset3[["cd24neg"]] <-
+  (experiment[["cd24neg"]] - cd24negNoiseCeiling) * factor
 
 # Replace negative values by zero
-dataset3$cd24neg[dataset3$cd24neg < 0] <- 0
-dataset3$cd24mid[dataset3$cd24mid < 0] <- 0
-dataset3$cd24hi[dataset3$cd24hi < 0]   <- 0
+dataset3[["cd24neg"]][dataset3$cd24neg < 0] <- 0
+dataset3[["cd24mid"]][dataset3$cd24mid < 0] <- 0
+dataset3[["cd24hi"]][dataset3$cd24hi < 0]   <- 0
 
 # To be or not to be, that is the question
-dataset3$cd24neg <- round(dataset3$cd24neg, digits=0)
-dataset3$cd24mid <- round(dataset3$cd24mid, digits=0)
-dataset3$cd24hi  <- round(dataset3$cd24hi, digits=0)
+dataset3[["cd24neg"]] <- round(dataset3[["cd24neg"]], digits=0)
+dataset3[["cd24mid"]] <- round(dataset3[["cd24mid"]], digits=0)
+dataset3[["cd24hi"]]  <- round(dataset3[["cd24hi"]], digits=0)
 
 # Compute remaining columns
-dataset3$cd24pos <- dataset3$cd24mid + dataset3$cd24hi
-dataset3$events  <- dataset3$cd24neg + dataset3$cd24pos
+dataset3[["cd24pos"]] <- dataset3[["cd24mid"]] + dataset3[["cd24hi"]]
+dataset3[["events"]]  <- dataset3[["cd24neg"]] + dataset3[["cd24pos"]]
 
-dataset3$cd24posProp <- dataset3$cd24pos / dataset3$events
-dataset3$cd24midProp <- dataset3$cd24mid / dataset3$events
-dataset3$cd24hiProp  <- dataset3$cd24hi  / dataset3$events
+dataset3[["cd24posProp"]] <- dataset3[["cd24pos"]] / dataset3[["events"]]
+dataset3[["cd24midProp"]] <- dataset3[["cd24mid"]] / dataset3[["events"]]
+dataset3[["cd24hiProp"]]  <- dataset3[["cd24hi"]]  / dataset3[["events"]]
 
 # We don't need these columns any longer
-dataset3$beads     <- NULL
-dataset3$cd24posTp <- NULL
-dataset3$cd24midTp <- NULL
-dataset3$cd24hiTp  <- NULL
-dataset3$cmVolume  <- 40
+dataset3[["beads"]]     <- NULL
+dataset3[["cd24posTp"]] <- NULL
+dataset3[["cd24midTp"]] <- NULL
+dataset3[["cd24hiTp"]]  <- NULL
+dataset3[["cmVolume"]]  <- 40
 
 printDataFrame(
   dataframe=dataset3[, interestingColumns],
@@ -3026,40 +3044,40 @@ First we must verify that test assumptions are met.
 
 # Testing for univariate normality
 significanceDfShapiro <- c(
-  stats::shapiro.test(dataset3$cd24pos)$p.value,
-  stats::shapiro.test(dataset3$cd24mid)$p.value,
-  stats::shapiro.test(dataset3$cd24hi)$p.value,
-  stats::shapiro.test(dataset3$cd24posProp)$p.value,
-  stats::shapiro.test(dataset3$cd24midProp)$p.value,
-  stats::shapiro.test(dataset3$cd24hiProp)$p.value
+  stats::shapiro.test(dataset3[["cd24pos"]])[["p.value"]],
+  stats::shapiro.test(dataset3[["cd24mid"]])[["p.value"]],
+  stats::shapiro.test(dataset3[["cd24hi"]])[["p.value"]],
+  stats::shapiro.test(dataset3[["cd24posProp"]])[["p.value"]],
+  stats::shapiro.test(dataset3[["cd24midProp"]])[["p.value"]],
+  stats::shapiro.test(dataset3[["cd24hiProp"]])[["p.value"]]
 )
 
 # Testing for homoscedasticity
 significanceDfHov <- c(
-  HH::hov(cd24pos ~ cellLine, data=dataset3)$p.value,
-  HH::hov(cd24mid ~ cellLine, data=dataset3)$p.value,
-  HH::hov(cd24hi ~ cellLine, data=dataset3)$p.value,
-  HH::hov(cd24posProp ~ cellLine, data=dataset3)$p.value,
-  HH::hov(cd24midProp ~ cellLine, data=dataset3)$p.value,
-  HH::hov(cd24hiProp ~ cellLine, data=dataset3)$p.value
+  HH::hov(cd24pos ~ cellLine, data=dataset3)[["p.value"]],
+  HH::hov(cd24mid ~ cellLine, data=dataset3)[["p.value"]],
+  HH::hov(cd24hi ~ cellLine, data=dataset3)[["p.value"]],
+  HH::hov(cd24posProp ~ cellLine, data=dataset3)[["p.value"]],
+  HH::hov(cd24midProp ~ cellLine, data=dataset3)[["p.value"]],
+  HH::hov(cd24hiProp ~ cellLine, data=dataset3)[["p.value"]]
 )
 
 significanceDfBartlett <- c(
-  stats::bartlett.test(cd24pos ~ cellLine, data=dataset3)$p.value,
-  stats::bartlett.test(cd24mid ~ cellLine, data=dataset3)$p.value,
-  stats::bartlett.test(cd24hi ~ cellLine, data=dataset3)$p.value,
-  stats::bartlett.test(cd24posProp ~ cellLine, data=dataset3)$p.value,
-  stats::bartlett.test(cd24midProp ~ cellLine, data=dataset3)$p.value,
-  stats::bartlett.test(cd24hiProp ~ cellLine, data=dataset3)$p.value
+  stats::bartlett.test(cd24pos ~ cellLine, data=dataset3)[["p.value"]],
+  stats::bartlett.test(cd24mid ~ cellLine, data=dataset3)[["p.value"]],
+  stats::bartlett.test(cd24hi ~ cellLine, data=dataset3)[["p.value"]],
+  stats::bartlett.test(cd24posProp ~ cellLine, data=dataset3)[["p.value"]],
+  stats::bartlett.test(cd24midProp ~ cellLine, data=dataset3)[["p.value"]],
+  stats::bartlett.test(cd24hiProp ~ cellLine, data=dataset3)[["p.value"]]
 )
 
 significanceDfFligner <- c(
-  stats::fligner.test(cd24pos ~ cellLine, data=dataset3)$p.value,
-  stats::fligner.test(cd24mid ~ cellLine, data=dataset3)$p.value,
-  stats::fligner.test(cd24hi ~ cellLine, data=dataset3)$p.value,
-  stats::fligner.test(cd24posProp ~ cellLine, data=dataset3)$p.value,
-  stats::fligner.test(cd24midProp ~ cellLine, data=dataset3)$p.value,
-  stats::fligner.test(cd24hiProp ~ cellLine, data=dataset3)$p.value
+  stats::fligner.test(cd24pos ~ cellLine, data=dataset3)[["p.value"]],
+  stats::fligner.test(cd24mid ~ cellLine, data=dataset3)[["p.value"]],
+  stats::fligner.test(cd24hi ~ cellLine, data=dataset3)[["p.value"]],
+  stats::fligner.test(cd24posProp ~ cellLine, data=dataset3)[["p.value"]],
+  stats::fligner.test(cd24midProp ~ cellLine, data=dataset3)[["p.value"]],
+  stats::fligner.test(cd24hiProp ~ cellLine, data=dataset3)[["p.value"]]
 )
 
 ```
@@ -3073,23 +3091,23 @@ significanceDfFligner <- c(
 graphics::par(mfrow=c(2, 3))
 
 # Base plots for univariate normality test
-stats::qqnorm(dataset3$cd24pos, main="CD24+ absolute count")
-stats::qqline(dataset3$cd24pos, col=colorPalette[["green"]])
+stats::qqnorm(dataset3[["cd24pos"]], main="CD24+ absolute count")
+stats::qqline(dataset3[["cd24pos"]], col=colorPalette[["green"]])
 
-stats::qqnorm(dataset3$cd24mid, main="CD24mid absolute count")
-stats::qqline(dataset3$cd24mid, col=colorPalette[["green"]])
+stats::qqnorm(dataset3[["cd24mid"]], main="CD24mid absolute count")
+stats::qqline(dataset3[["cd24mid"]], col=colorPalette[["green"]])
 
-stats::qqnorm(dataset3$cd24hi, main="CD24hi absolute count")
-stats::qqline(dataset3$cd24hi, col=colorPalette[["green"]])
+stats::qqnorm(dataset3[["cd24hi"]], main="CD24hi absolute count")
+stats::qqline(dataset3[["cd24hi"]], col=colorPalette[["green"]])
 
-stats::qqnorm(dataset3$cd24posProp, main="CD24+ proportion")
-stats::qqline(dataset3$cd24posProp, col=colorPalette[["green"]])
+stats::qqnorm(dataset3[["cd24posProp"]], main="CD24+ proportion")
+stats::qqline(dataset3[["cd24posProp"]], col=colorPalette[["green"]])
 
-stats::qqnorm(dataset3$cd24midProp, main="CD24mid proportion")
-stats::qqline(dataset3$cd24midProp, col=colorPalette[["green"]])
+stats::qqnorm(dataset3[["cd24midProp"]], main="CD24mid proportion")
+stats::qqline(dataset3[["cd24midProp"]], col=colorPalette[["green"]])
 
-stats::qqnorm(dataset3$cd24hiProp, main="CD24hi proportion")
-stats::qqline(dataset3$cd24hiProp, col=colorPalette[["green"]])
+stats::qqnorm(dataset3[["cd24hiProp"]], main="CD24hi proportion")
+stats::qqline(dataset3[["cd24hiProp"]], col=colorPalette[["green"]])
 
 ```
 
@@ -3179,12 +3197,12 @@ significanceDfAnova <- c(
 
 # Also perform a non-parametric equivalent of an ANOVA and retrieve the p-Values
 significanceDfKruskal <- c(
-  stats::kruskal.test(cd24pos ~ cellLine, data=dataset3)$p.value,
-  stats::kruskal.test(cd24mid ~ cellLine, data=dataset3)$p.value,
-  stats::kruskal.test(cd24hi ~ cellLine, data=dataset3)$p.value,
-  stats::kruskal.test(cd24posProp ~ cellLine, data=dataset3)$p.value,
-  stats::kruskal.test(cd24midProp ~ cellLine, data=dataset3)$p.value,
-  stats::kruskal.test(cd24hiProp ~ cellLine, data=dataset3)$p.value
+  stats::kruskal.test(cd24pos ~ cellLine, data=dataset3)[["p.value"]],
+  stats::kruskal.test(cd24mid ~ cellLine, data=dataset3)[["p.value"]],
+  stats::kruskal.test(cd24hi ~ cellLine, data=dataset3)[["p.value"]],
+  stats::kruskal.test(cd24posProp ~ cellLine, data=dataset3)[["p.value"]],
+  stats::kruskal.test(cd24midProp ~ cellLine, data=dataset3)[["p.value"]],
+  stats::kruskal.test(cd24hiProp ~ cellLine, data=dataset3)[["p.value"]]
 )
 
 # Create a big matrix with the p-Values for all the tests we did
@@ -3235,7 +3253,7 @@ printDataFrame(
 
 # Transform this dataframe into a tidy format for plotting purposes
 significanceDfMolten <- significanceDf
-significanceDfMolten$parameter <- row.names(significanceDf)
+significanceDfMolten[["parameter"]] <- row.names(significanceDf)
 significanceDfMolten <- reshape2::melt(
   data=significanceDfMolten,
   id.vars="parameter",
@@ -3244,8 +3262,8 @@ significanceDfMolten <- reshape2::melt(
 )
 
 # Break down p-Value into discrete intervals
-significanceDfMolten$pDiscrete <- cut(
-  significanceDfMolten$p,
+significanceDfMolten[["pDiscrete"]] <- cut(
+  significanceDfMolten[["p"]],
   breaks=c(0.00, 0.01, 0.05, 0.10, 0.15, 0.20, 0.25, 1.00),
   labels=c(
     "p < 0.01",
@@ -3259,8 +3277,8 @@ significanceDfMolten$pDiscrete <- cut(
 )
 
 # Make sure the levels is plotted from top to bottom in order
-significanceDfMolten$parameter <- factor(
-  as.character(significanceDfMolten$parameter),
+significanceDfMolten[["parameter"]] <- factor(
+  as.character(significanceDfMolten[["parameter"]]),
   levels=rev(significanceDfParameters)
 )
 
@@ -3380,19 +3398,20 @@ lmFitSwarmDilution <- stats::lm(
 )
 
 afBase <- stats::anova(lmFitBase)
-afBase$percentVariance <- (afBase$"Sum Sq" / sum(afBase$"Sum Sq")) * 100
+afBase[["percentVariance"]] <-
+  (afBase[["Sum Sq"]] / sum(afBase[["Sum Sq"]])) * 100
 
 afBase
 
 afDilution <- stats::anova(lmFitDilution)
-afDilution$percentVariance <-
-  (afDilution$"Sum Sq" / sum(afDilution$"Sum Sq")) * 100
+afDilution[["percentVariance"]] <-
+  (afDilution[["Sum Sq"]] / sum(afDilution[["Sum Sq"]])) * 100
 
 afDilution
 
 afSwarmDilution <- stats::anova(lmFitSwarmDilution)
-afSwarmDilution$percentVariance <-
-  (afSwarmDilution$"Sum Sq" / sum(afSwarmDilution$"Sum Sq")) * 100
+afSwarmDilution[["percentVariance"]] <-
+  (afSwarmDilution[["Sum Sq"]] / sum(afSwarmDilution[["Sum Sq"]])) * 100
 
 afSwarmDilution
 
@@ -3428,19 +3447,20 @@ lmFitSwarmDilution <- stats::lm(
 )
 
 afBase <- stats::anova(lmFitBase)
-afBase$percentVariance <- (afBase$"Sum Sq" / sum(afBase$"Sum Sq")) * 100
+afBase[["percentVariance"]] <-
+  (afBase[["Sum Sq"]] / sum(afBase[["Sum Sq"]])) * 100
 
 afBase
 
 afDilution <- stats::anova(lmFitDilution)
-afDilution$percentVariance <-
-  (afDilution$"Sum Sq" / sum(afDilution$"Sum Sq")) * 100
+afDilution[["percentVariance"]] <-
+  (afDilution[["Sum Sq"]] / sum(afDilution[["Sum Sq"]])) * 100
 
 afDilution
 
 afSwarmDilution <- stats::anova(lmFitSwarmDilution)
-afSwarmDilution$percentVariance <-
-  (afSwarmDilution$"Sum Sq" / sum(afSwarmDilution$"Sum Sq")) * 100
+afSwarmDilution[["percentVariance"]] <-
+  (afSwarmDilution[["Sum Sq"]] / sum(afSwarmDilution[["Sum Sq"]])) * 100
 
 afSwarmDilution
 
@@ -3476,19 +3496,20 @@ lmFitSwarmDilution <- stats::lm(
 )
 
 afBase <- stats::anova(lmFitBase)
-afBase$percentVariance <- (afBase$"Sum Sq" / sum(afBase$"Sum Sq")) * 100
+afBase[["percentVariance"]] <-
+  (afBase[["Sum Sq"]] / sum(afBase[["Sum Sq"]])) * 100
 
 afBase
 
 afDilution <- stats::anova(lmFitDilution)
-afDilution$percentVariance <-
-  (afDilution$"Sum Sq" / sum(afDilution$"Sum Sq")) * 100
+afDilution[["percentVariance"]] <-
+  (afDilution[["Sum Sq"]] / sum(afDilution[["Sum Sq"]])) * 100
 
 afDilution
 
 afSwarmDilution <- stats::anova(lmFitSwarmDilution)
-afSwarmDilution$percentVariance <-
-  (afSwarmDilution$"Sum Sq" / sum(afSwarmDilution$"Sum Sq")) * 100
+afSwarmDilution[["percentVariance"]] <-
+  (afSwarmDilution[["Sum Sq"]] / sum(afSwarmDilution[["Sum Sq"]])) * 100
 
 afSwarmDilution
 
@@ -3509,8 +3530,8 @@ type3Anova <- car::Anova(
   type=3
 )
 
-type3Anova$percentVariance <-
-  (type3Anova$"Sum Sq" / sum(type3Anova$"Sum Sq")) * 100
+type3Anova[["percentVariance"]] <-
+  (type3Anova[["Sum Sq"]] / sum(type3Anova[["Sum Sq"]])) * 100
 
 type3Anova
 ```
@@ -3526,8 +3547,8 @@ type3Anova <- car::Anova(
   type=3
 )
 
-type3Anova$percentVariance <-
-  (type3Anova$"Sum Sq" / sum(type3Anova$"Sum Sq")) * 100
+type3Anova[["percentVariance"]] <-
+  (type3Anova[["Sum Sq"]] / sum(type3Anova[["Sum Sq"]])) * 100
 
 type3Anova
 ```
@@ -3542,8 +3563,8 @@ type3Anova <- car::Anova(
   type=3
 )
 
-type3Anova$percentVariance <-
-  (type3Anova$"Sum Sq" / sum(type3Anova$"Sum Sq")) * 100
+type3Anova[["percentVariance"]] <-
+  (type3Anova[["Sum Sq"]] / sum(type3Anova[["Sum Sq"]])) * 100
 
 type3Anova
 ```
