@@ -967,7 +967,7 @@ ggplot2::ggplot(
 
 #### Mixed distribution modeling
 
-\\
+\
 
 Let's compute the ML estimate of the mixed distribution using an expectation-maximization algorithm
 provided by mixtools. This will serve as an initial estimation of subpopulation characteristics before
@@ -1217,7 +1217,7 @@ plotModelClusters(
 
 #### Parameter optimization
 
-\\
+\
 
 Now that we've generated a mixed model for every sample, we can compute best-fit parameters for the whole experiment globally.
 
@@ -1231,15 +1231,17 @@ estimateGlobalParameters <- function(model) {
   negStats <- model %>%
     dplyr::filter(negCluster == 1, posCluster == 2) %>%
       dplyr::summarise(
-        mu    = stats::weighted.mean(muNeg,    w=1-hartigans),
-        sigma = stats::weighted.mean(sigmaNeg, w=1-hartigans)
+        mu      = stats::weighted.mean(muNeg,    w=1-hartigans),
+        sigma   = stats::weighted.mean(sigmaNeg, w=1-hartigans),
+        .groups = "drop"
       )
 
   posStats <- model %>%
     dplyr::filter(negCluster == 1, posCluster == 2) %>%
       dplyr::summarise(
-        mu    = stats::weighted.mean(muPos,    w=1-hartigans),
-        sigma = stats::weighted.mean(sigmaPos, w=1-hartigans)
+        mu      = stats::weighted.mean(muPos,    w=1-hartigans),
+        sigma   = stats::weighted.mean(sigmaPos, w=1-hartigans),
+        .groups = "drop"
       )
 
   params <- rbind("neg" = negStats, "pos" = posStats)
@@ -1285,7 +1287,7 @@ printDataFrame(
 
 #### Resolving the distributions using an EM algorithm
 
-\\
+\
 
 Reference:
 * http://tinyheero.github.io/2016/01/03/gmm-em.html
@@ -1451,7 +1453,7 @@ printDataFrame(
 
 #### Plotting the solutions
 
-\\
+\
 
 Now that we have obtained the optimal solution for our data set, we can create model distributions for use in plotting:
 
@@ -1702,7 +1704,8 @@ plotDeconvAggregateExperiment <- function(gs, model, gate, axis) {
         pPos     = sum(nPos) / sum(nTot),
         nNeg     = sum(nNeg),
         nPos     = sum(nPos),
-        nTot     = sum(nTot)
+        nTot     = sum(nTot),
+        .groups  = "drop"
       )
 
   mixedModelDistributions <- distForAggregatePlotting(model)
@@ -1995,7 +1998,8 @@ printDataFrame(
 \newpage
 
 #### Dataset 1 - Raw gate counts
-\\
+
+\
 
 ```{r dataset1, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
 
@@ -2034,7 +2038,7 @@ printDataFrame(
 
 #### Dataset 2 - Swarm-deconvoluted
 
-\\
+\
 
 ```{r dataset2, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
 
@@ -2066,7 +2070,7 @@ printDataFrame(
 
 #### Dataset 3 - Swarm-deconvoluted and normalized
 
-\\
+\
 
 ```{r computingNoise, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=12, fig.height=8}
 
@@ -2182,7 +2186,7 @@ printDataFrame(
 
 #### Dataset 1 - Raw gate counts
 
-\\
+\
 
 ```{r reporting6, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
 
@@ -2190,17 +2194,17 @@ printDataFrame(
 dataset1Summary <- dataset1 %>%
   dplyr::group_by(cellLine, dilution) %>%
     dplyr::summarise(
-      n          = dplyr::n(),
-      eventsAvg  = BiocGenerics::mean(events),
-      eventsSem  = BiocGenerics::sd(events) / dplyr::n(),
-      cd24posAvg = BiocGenerics::mean(cd24pos),
-      cd24posSem = BiocGenerics::sd(cd24pos) / dplyr::n(),
-      cd24negAvg = BiocGenerics::mean(cd24neg),
-      cd24negSem = BiocGenerics::sd(cd24neg) / dplyr::n(),
-      cd24hiAvg  = BiocGenerics::mean(cd24hi),
-      cd24hiSem  = BiocGenerics::sd(cd24hi) / dplyr::n(),
-      cd24midAvg = BiocGenerics::mean(cd24mid),
-      cd24midSem = BiocGenerics::sd(cd24mid) / dplyr::n(),
+      n              = dplyr::n(),
+      eventsAvg      = BiocGenerics::mean(events),
+      eventsSem      = BiocGenerics::sd(events) / dplyr::n(),
+      cd24posAvg     = BiocGenerics::mean(cd24pos),
+      cd24posSem     = BiocGenerics::sd(cd24pos) / dplyr::n(),
+      cd24negAvg     = BiocGenerics::mean(cd24neg),
+      cd24negSem     = BiocGenerics::sd(cd24neg) / dplyr::n(),
+      cd24hiAvg      = BiocGenerics::mean(cd24hi),
+      cd24hiSem      = BiocGenerics::sd(cd24hi) / dplyr::n(),
+      cd24midAvg     = BiocGenerics::mean(cd24mid),
+      cd24midSem     = BiocGenerics::sd(cd24mid) / dplyr::n(),
       cd24posPropAvg = BiocGenerics::mean(cd24pos/events),
       cd24posPropSem = BiocGenerics::sd(cd24pos/events) / dplyr::n(),
       cd24negPropAvg = BiocGenerics::mean(cd24neg/events),
@@ -2208,14 +2212,15 @@ dataset1Summary <- dataset1 %>%
       cd24midPropAvg = BiocGenerics::mean(cd24mid/events),
       cd24midPropSem = BiocGenerics::sd(cd24mid/events) / dplyr::n(),
       cd24hiPropAvg  = BiocGenerics::mean(cd24hi/events),
-      cd24hiPropSem  = BiocGenerics::sd(cd24hi/events) / dplyr::n()
+      cd24hiPropSem  = BiocGenerics::sd(cd24hi/events) / dplyr::n(),
+      .groups="drop"
     )
 
 ```
 
 \newpage
 
-```{r reporting8, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
+```{r reporting8A, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
 
 interestingColumns <- function(metric) {
   c(
@@ -2240,6 +2245,10 @@ printDataFrame(
   fontsize=5
 )
 
+```
+
+```{r reporting8B, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
+
 printDataFrame(
   dataframe=dataset1Summary[, interestingColumns("Sem")],
   caption="Normalized experiment summary: calculated SEMs",
@@ -2253,7 +2262,7 @@ printDataFrame(
 
 #### Dataset 2 - Swarm-deconvoluted
 
-\\
+\
 
 ```{r reporting7, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
 
@@ -2261,17 +2270,17 @@ printDataFrame(
 dataset2Summary <- dataset2 %>%
   dplyr::group_by(cellLine, dilution) %>%
     dplyr::summarise(
-      n          = dplyr::n(),
-      eventsAvg  = BiocGenerics::mean(events),
-      eventsSem  = BiocGenerics::sd(events) / dplyr::n(),
-      cd24posAvg = BiocGenerics::mean(cd24pos),
-      cd24posSem = BiocGenerics::sd(cd24pos) / dplyr::n(),
-      cd24negAvg = BiocGenerics::mean(cd24neg),
-      cd24negSem = BiocGenerics::sd(cd24neg) / dplyr::n(),
-      cd24hiAvg  = BiocGenerics::mean(cd24hi),
-      cd24hiSem  = BiocGenerics::sd(cd24hi) / dplyr::n(),
-      cd24midAvg = BiocGenerics::mean(cd24mid),
-      cd24midSem = BiocGenerics::sd(cd24mid) / dplyr::n(),
+      n              = dplyr::n(),
+      eventsAvg      = BiocGenerics::mean(events),
+      eventsSem      = BiocGenerics::sd(events) / dplyr::n(),
+      cd24posAvg     = BiocGenerics::mean(cd24pos),
+      cd24posSem     = BiocGenerics::sd(cd24pos) / dplyr::n(),
+      cd24negAvg     = BiocGenerics::mean(cd24neg),
+      cd24negSem     = BiocGenerics::sd(cd24neg) / dplyr::n(),
+      cd24hiAvg      = BiocGenerics::mean(cd24hi),
+      cd24hiSem      = BiocGenerics::sd(cd24hi) / dplyr::n(),
+      cd24midAvg     = BiocGenerics::mean(cd24mid),
+      cd24midSem     = BiocGenerics::sd(cd24mid) / dplyr::n(),
       cd24posPropAvg = BiocGenerics::mean(cd24pos/events),
       cd24posPropSem = BiocGenerics::sd(cd24pos/events) / dplyr::n(),
       cd24negPropAvg = BiocGenerics::mean(cd24neg/events),
@@ -2279,7 +2288,8 @@ dataset2Summary <- dataset2 %>%
       cd24midPropAvg = BiocGenerics::mean(cd24mid/events),
       cd24midPropSem = BiocGenerics::sd(cd24mid/events) / dplyr::n(),
       cd24hiPropAvg  = BiocGenerics::mean(cd24hi/events),
-      cd24hiPropSem  = BiocGenerics::sd(cd24hi/events) / dplyr::n()
+      cd24hiPropSem  = BiocGenerics::sd(cd24hi/events) / dplyr::n(),
+      .groups="drop"
     )
 
 ```
@@ -2287,13 +2297,17 @@ dataset2Summary <- dataset2 %>%
 
 \newpage
 
-```{r reporting9, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
+```{r reporting9A, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
 
 printDataFrame(
   dataframe=dataset2Summary[, interestingColumns("Avg")],
   caption="Normalized experiment summary (deconvoluted): calculated means",
   fontsize=5
 )
+
+```
+
+```{r reporting9B, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
 
 printDataFrame(
   dataframe=dataset2Summary[, interestingColumns("Sem")],
@@ -2308,7 +2322,7 @@ printDataFrame(
 
 #### Dataset 3 - Swarm-deconvoluted and normalized
 
-\\
+\
 
 ```{r reporting27, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
 
@@ -2316,17 +2330,17 @@ printDataFrame(
 dataset3Summary <- dataset3 %>%
   dplyr::group_by(cellLine, dilution) %>%
     dplyr::summarise(
-      n          = dplyr::n(),
-      eventsAvg  = BiocGenerics::mean(events),
-      eventsSem  = BiocGenerics::sd(events) / dplyr::n(),
-      cd24posAvg = BiocGenerics::mean(cd24pos),
-      cd24posSem = BiocGenerics::sd(cd24pos) / dplyr::n(),
-      cd24negAvg = BiocGenerics::mean(cd24neg),
-      cd24negSem = BiocGenerics::sd(cd24neg) / dplyr::n(),
-      cd24hiAvg  = BiocGenerics::mean(cd24hi),
-      cd24hiSem  = BiocGenerics::sd(cd24hi) / dplyr::n(),
-      cd24midAvg = BiocGenerics::mean(cd24mid),
-      cd24midSem = BiocGenerics::sd(cd24mid) / dplyr::n(),
+      n              = dplyr::n(),
+      eventsAvg      = BiocGenerics::mean(events),
+      eventsSem      = BiocGenerics::sd(events) / dplyr::n(),
+      cd24posAvg     = BiocGenerics::mean(cd24pos),
+      cd24posSem     = BiocGenerics::sd(cd24pos) / dplyr::n(),
+      cd24negAvg     = BiocGenerics::mean(cd24neg),
+      cd24negSem     = BiocGenerics::sd(cd24neg) / dplyr::n(),
+      cd24hiAvg      = BiocGenerics::mean(cd24hi),
+      cd24hiSem      = BiocGenerics::sd(cd24hi) / dplyr::n(),
+      cd24midAvg     = BiocGenerics::mean(cd24mid),
+      cd24midSem     = BiocGenerics::sd(cd24mid) / dplyr::n(),
       cd24posPropAvg = BiocGenerics::mean(cd24pos/events),
       cd24posPropSem = BiocGenerics::sd(cd24pos/events) / dplyr::n(),
       cd24negPropAvg = BiocGenerics::mean(cd24neg/events),
@@ -2334,7 +2348,8 @@ dataset3Summary <- dataset3 %>%
       cd24midPropAvg = BiocGenerics::mean(cd24mid/events),
       cd24midPropSem = BiocGenerics::sd(cd24mid/events) / dplyr::n(),
       cd24hiPropAvg  = BiocGenerics::mean(cd24hi/events),
-      cd24hiPropSem  = BiocGenerics::sd(cd24hi/events) / dplyr::n()
+      cd24hiPropSem  = BiocGenerics::sd(cd24hi/events) / dplyr::n(),
+      .groups="drop"
     )
 
 ```
@@ -2342,13 +2357,17 @@ dataset3Summary <- dataset3 %>%
 
 \newpage
 
-```{r reporting28, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
+```{r reporting28A, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
 
 printDataFrame(
   dataframe=dataset3Summary[, interestingColumns("Avg")],
   caption="Denoised and normalized experiment summary: calculated means",
   fontsize=5
 )
+
+```
+
+```{r reporting28B, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
 
 printDataFrame(
   dataframe=dataset3Summary[, interestingColumns("Sem")],
@@ -2365,7 +2384,7 @@ printDataFrame(
 
 #### Dataset 1 - Raw gate counts
 
-\\
+\
 
 ```{r reporting3, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=12, fig.height=8}
 
@@ -2476,7 +2495,7 @@ plotA6 <- abcTemplate(
 
 #### Dataset 2 - Swarm-deconvoluted
 
-\\
+\
 
 ```{r reporting4736, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=12, fig.height=8}
 
@@ -2547,7 +2566,7 @@ plotB6 <- abcTemplate(
 
 #### Dataset 3 - Swarm-deconvoluted and normalized
 
-\\
+\
 
 ```{r reporting34353, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=12, fig.height=8}
 # Let's generate plots to show the final result
@@ -2621,7 +2640,7 @@ plotC6 <- abcTemplate(
 
 #### Dataset 1 - Raw gate counts
 
-\\
+\
 
 ```{r reporting10, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=12, fig.height=8}
 
@@ -2767,7 +2786,7 @@ plotD6 <- defTemplate(
 
 #### Dataset 2 - Swarm-deconvoluted
 
-\\
+\
 
 ```{r reporting13, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=12, fig.height=8}
 
@@ -2844,7 +2863,7 @@ plotE6 <- defTemplate(
 
 #### Dataset 3 - Swarm-deconvoluted and normalized
 
-\\
+\
 
 ```{r reporting29, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4}
 
@@ -2925,7 +2944,7 @@ plotF6 <- defTemplate(
 
 #### Sample graphs
 
-\\
+\
 
 ```{r reporting25, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=12, fig.height=12}
 
@@ -2963,7 +2982,7 @@ gridExtra::grid.arrange(
 
 #### Summary graphs
 
-\\
+\
 
 ```{r reporting35, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=12, fig.height=12}
 

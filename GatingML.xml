@@ -134,7 +134,7 @@
     <gating:dimension gating:min="800" gating:max="850" gating:compensation-ref="uncompensated">
       <data-type:fcs-dimension data-type:name="FS.Log" />
     </gating:dimension>
-    <gating:dimension gating:min="890" gating:max="1023" gating:compensation-ref="uncompensated">
+    <gating:dimension gating:min="910" gating:max="1023" gating:compensation-ref="uncompensated">
       <data-type:fcs-dimension data-type:name="SS.Log" />
     </gating:dimension>
   </gating:RectangleGate>
@@ -143,7 +143,7 @@
     <gating:dimension gating:min="0" gating:max="1023" gating:compensation-ref="uncompensated">
       <data-type:fcs-dimension data-type:name="FL5.Log" />
     </gating:dimension>
-    <gating:dimension gating:min="300" gating:max="1023" gating:compensation-ref="uncompensated">
+    <gating:dimension gating:min="360" gating:max="960" gating:compensation-ref="uncompensated">
       <data-type:fcs-dimension data-type:name="SS.Lin" />
     </gating:dimension>
   </gating:RectangleGate>
@@ -157,7 +157,7 @@
 
   <gating:BooleanGate gating:id="nonBeads" gating:parent_id="nonNoise">
     <gating:not>
-      <gating:gateReference gating:ref="Beads" />
+      <gating:gateReference gating:ref="beads" />
     </gating:not>
   </gating:BooleanGate>
 
@@ -177,7 +177,7 @@
     </gating:dimension>
     <gating:vertex>
       <gating:coordinate data-type:value="350" />
-      <gating:coordinate data-type:value="345" />
+      <gating:coordinate data-type:value="270" />
     </gating:vertex>
     <gating:vertex>
       <gating:coordinate data-type:value="1023" />
@@ -202,7 +202,7 @@
     </gating:dimension>
     <gating:vertex>
       <gating:coordinate data-type:value="350" />
-      <gating:coordinate data-type:value="345" />
+      <gating:coordinate data-type:value="270" />
     </gating:vertex>
     <gating:vertex>
       <gating:coordinate data-type:value="1023" />
@@ -227,7 +227,7 @@
     </gating:dimension>
     <gating:vertex>
       <gating:coordinate data-type:value="350" />
-      <gating:coordinate data-type:value="345" />
+      <gating:coordinate data-type:value="270" />
     </gating:vertex>
     <gating:vertex>
       <gating:coordinate data-type:value="1023" />
@@ -238,12 +238,12 @@
       <gating:coordinate data-type:value="1023" />
     </gating:vertex>
     <gating:vertex>
-      <gating:coordinate data-type:value="780" />
+      <gating:coordinate data-type:value="900" />
       <gating:coordinate data-type:value="1023" />
     </gating:vertex>
     <gating:vertex>
       <gating:coordinate data-type:value="350" />
-      <gating:coordinate data-type:value="560" />
+      <gating:coordinate data-type:value="500" />
     </gating:vertex>
   </gating:PolygonGate>
 
@@ -256,10 +256,10 @@
     </gating:dimension>
     <gating:vertex>
       <gating:coordinate data-type:value="350" />
-      <gating:coordinate data-type:value="560" />
+      <gating:coordinate data-type:value="500" />
     </gating:vertex>
     <gating:vertex>
-      <gating:coordinate data-type:value="780" />
+      <gating:coordinate data-type:value="900" />
       <gating:coordinate data-type:value="1023" />
     </gating:vertex>
     <gating:vertex>
