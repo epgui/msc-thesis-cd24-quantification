@@ -128,7 +128,6 @@ colorPalette <- list(
   "green" = "#00AA00"
 )
 
-
 # Output dataframe in PDF-friendly format
 printDataFrame <- function(dataframe, caption, fontsize=7) {
   knitr::kable(
@@ -448,29 +447,17 @@ getGateParent <- function(gateName) {
   flowEnv[[gateName]]@filters[[2]]@name
 }
 
-flowWorkspace::gs_pop_add(
-  gs=gatingset,
-  gate=getGate("boundary"),
-  parent=getGateParent("boundary")
-)
+initializeGates <- function(gateNames) {
+  for (gateName in gateNames) {
+    flowWorkspace::gs_pop_add(
+      gs=gatingset,
+      gate=getGate(gateName),
+      parent=getGateParent(gateName)
+    )
+  }
+}
 
-flowWorkspace::gs_pop_add(
-  gs=gatingset,
-  gate=getGate("nonNoise"),
-  parent=getGateParent("nonNoise")
-)
-
-flowWorkspace::gs_pop_add(
-  gs=gatingset,
-  gate=getGate("beadsA"),
-  parent=getGateParent("beadsA")
-)
-
-flowWorkspace::gs_pop_add(
-  gs=gatingset,
-  gate=getGate("beadsB"),
-  parent=getGateParent("beadsB")
-)
+initializeGates(c("boundary", "nonNoise", "beadsA", "beadsB"))
 
 flowWorkspace::gs_pop_add(
   gs=gatingset,
@@ -486,29 +473,7 @@ flowWorkspace::gs_pop_add(
   parent="nonNoise"
 )
 
-flowWorkspace::gs_pop_add(
-  gs=gatingset,
-  gate=getGate("cd24pos"),
-  parent=getGateParent("cd24pos")
-)
-
-flowWorkspace::gs_pop_add(
-  gs=gatingset,
-  gate=getGate("cd24neg"),
-  parent=getGateParent("cd24neg")
-)
-
-flowWorkspace::gs_pop_add(
-  gs=gatingset,
-  gate=getGate("cd24mid"),
-  parent=getGateParent("cd24mid")
-)
-
-flowWorkspace::gs_pop_add(
-  gs=gatingset,
-  gate=getGate("cd24hi"),
-  parent=getGateParent("cd24hi")
-)
+initializeGates(c("cd24pos", "cd24neg", "cd24mid", "cd24hi"))
 
 ```
 
@@ -1356,18 +1321,6 @@ And we can now iterate over both steps up to 50 times for each sample:
 ```{r EMalgorithmExecution, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE}
 
 solveSwarmProportions <- function(gs, gate, axis, model) {
-  # Linter bindings
-  muNeg <-
-  muPos <-
-  sigmaNeg <-
-  sigmaPos <-
-  pNeg <-
-  pPos <-
-  nNeg <-
-  nPos <-
-  nTot <-
-  alpha <- NULL
-
   populationsMu <- c(model[["muNeg"]][1], model[["muPos"]][1])
   populationsSd <- c(model[["sigmaNeg"]][1], model[["sigmaPos"]][1])
   populationsProportions <- c(model[["pNeg"]][1], model[["pPos"]][1])
@@ -1670,10 +1623,6 @@ distForAggregatePlotting <- function(model) {
 }
 
 plotDeconvAggregateExperiment <- function(gs, model, gate, axis) {
-  # Linter bindings
-  cellLine <-
-  dilution <- NULL
-
   mapFacetRowToCellLine <- wrapr::qc(
     "r1" = "786-O",
     "r2" = "786-O",
@@ -3420,6 +3369,9 @@ decreaseInVarianceFromDilution <- 1 - (
     / afDilution["dilution", "percentVariance"])
 
 decreaseInVarianceFromDilution
+
+datasetNormalizedForLm
+  
 ```
 
 ```{r varianceReductionCalculationCD24hi, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE, fig.width=5, fig.height=4.5}
@@ -3567,6 +3519,80 @@ type3Anova[["percentVariance"]] <-
   (type3Anova[["Sum Sq"]] / sum(type3Anova[["Sum Sq"]])) * 100
 
 type3Anova
+```
+
+```{r anovaSummaryGraphs, echo=TRUE, results="markup", include=TRUE, warning=TRUE, message=TRUE}
+
+summaryPlotting <- normalizedExperiment
+summaryPlotting[["cd24midRelativeTo786"]] <- 1
+summaryPlotting[["cd24hiRelativeTo786"]]  <- 1
+summaryPlotting[["cd24posRelativeTo786"]] <- 1
+
+for (n in summaryPlotting[["n"]]) {
+  for (dilution in summaryPlotting[["dilution"]]) {
+    correspondingData <- summaryPlotting %>%
+      dplyr::filter(cellLine == "786-O", dilution == dilution) %>%
+      dplyr::summarise(
+        "cd24mid" = BiocGenerics::mean(cd24mid * cd24midTp),
+        "cd24hi"  = BiocGenerics::mean(cd24hi * cd24hiTp),
+        "cd24pos" = BiocGenerics::mean(cd24pos * cd24posTp)
+      )
+
+    summaryPlotting[["cd24midRelative"]] <-
+      (summaryPlotting[["cd24mid"]] * summaryPlotting[["cd24midTp"]]) /
+      correspondingData[["cd24mid"]]
+
+    summaryPlotting[["cd24hiRelative"]] <-
+      (summaryPlotting[["cd24hi"]] * summaryPlotting[["cd24hiTp"]]) /
+      correspondingData[["cd24hi"]]
+
+    summaryPlotting[["cd24posRelative"]] <-
+      (summaryPlotting[["cd24pos"]] * summaryPlotting[["cd24posTp"]]) /
+      correspondingData[["cd24pos"]]
+  }
+}
+
+summaryPlotting <- summaryPlotting %>%
+  dplyr::group_by(cellLine) %>%
+  dplyr::summarise(
+    "cd24midRelativeAvg" = BiocGenerics::mean(cd24midRelative),
+    "cd24hiRelativeAvg"  = BiocGenerics::mean(cd24hiRelative),
+    "cd24posRelativeAvg" = BiocGenerics::mean(cd24posRelative),
+    "cd24midRelativeSem" = BiocGenerics::sd(cd24midRelative) / dplyr::n(),
+    "cd24hiRelativeSem"  = BiocGenerics::sd(cd24hiRelative) / dplyr::n(),
+    "cd24posRelativeSem" = BiocGenerics::sd(cd24posRelative) / dplyr::n(),
+    .groups="drop"
+  )
+
+ggplot2::ggplot(
+  data=summaryPlotting,
+  mapping=ggplot2::aes(
+    x=cellLine,
+    y=cd24posRelativeAvg
+  )
+) +
+  ggplot2::labs(
+    title="",
+    subtitle="",
+    x=ggplot2::element_blank(),
+    y="Abondance relative") +
+  ggplot2::theme(
+    panel.background=ggplot2::element_rect(fill="#F4F4F4"),
+    panel.grid.major.x=ggplot2::element_blank(),
+    panel.grid.minor.x=ggplot2::element_blank(),
+    panel.grid.minor.y=ggplot2::element_line(colour="#EEEEEE"),
+    axis.ticks=ggplot2::element_blank()) +
+  ggplot2::geom_bar(
+    position=ggplot2::position_dodge(),
+    stat="identity") +
+  ggplot2::geom_errorbar(
+    mapping=ggplot2::aes(
+      ymin=cd24posRelativeAvg - cd24posRelativeSem,
+      ymax=cd24posRelativeAvg + cd24posRelativeSem),
+    width=0.5,
+    size=1,
+    show.legend=FALSE)
+
 ```
 
 # References
