@@ -188,7 +188,7 @@
       <gating:coordinate data-type:value="0" />
     </gating:vertex>
     <gating:vertex>
-      <gating:coordinate data-type:value="0" />
+      <gating:coordinate data-type:value="350" />
       <gating:coordinate data-type:value="0" />
     </gating:vertex>
   </gating:PolygonGate>
